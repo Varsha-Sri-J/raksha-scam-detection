@@ -22,12 +22,19 @@ class RiskTier(str, Enum):
 class ManipulationCategory(str, Enum):
     URGENCY = "URGENCY"
     AUTHORITY_IMPERSONATION = "AUTHORITY_IMPERSONATION"
-    ISOLATION = "ISOLATION"
-    FINANCIAL_EXTRACTION = "FINANCIAL_EXTRACTION"
-    THREAT_INTIMIDATION = "THREAT_INTIMIDATION"
-    CREDENTIAL_HARVESTING = "CREDENTIAL_HARVESTING"
+    ISOLATION_SECRECY = "ISOLATION_SECRECY"
+    FINANCIAL_REDIRECTION = "FINANCIAL_REDIRECTION"
+    FEAR_INTIMIDATION = "FEAR_INTIMIDATION"
+    INFORMATION_PHISHING = "INFORMATION_PHISHING"
     CONFUSION_OVERWHELM = "CONFUSION_OVERWHELM"
-    FALSE_SALVATION = "FALSE_SALVATION"
+    RELIEF_FALSE_SALVATION = "RELIEF_FALSE_SALVATION"
+
+    # Backward compatibility aliases
+    ISOLATION = "ISOLATION_SECRECY"
+    FINANCIAL_EXTRACTION = "FINANCIAL_REDIRECTION"
+    THREAT_INTIMIDATION = "FEAR_INTIMIDATION"
+    CREDENTIAL_HARVESTING = "INFORMATION_PHISHING"
+    FALSE_SALVATION = "RELIEF_FALSE_SALVATION"
 
 
 class SessionStatus(str, Enum):
@@ -48,6 +55,8 @@ class TacticMatch(BaseModel):
     tactic: ManipulationCategory
     confidence: float = Field(ge=0.0, le=1.0)
     evidence_text: str
+    explanation: Optional[str] = None
+    description: Optional[str] = None
     timestamp: float = Field(default_factory=time.time)
 
 
@@ -56,6 +65,11 @@ class RiskAssessment(BaseModel):
     overall_score: float = Field(ge=0.0, le=100.0, default=0.0)
     risk_tier: RiskTier = RiskTier.SAFE
     triggered_tactics: List[TacticMatch] = Field(default_factory=list)
+    accumulated_tactics: List[ManipulationCategory] = Field(default_factory=list)
+    evidence_segments: List[str] = Field(default_factory=list)
+    tactic_evidence: Dict[str, List[str]] = Field(default_factory=dict)
+    score_delta: float = 0.0
+    explanation: str = "Baseline safe state."
     timestamp: float = Field(default_factory=time.time)
 
 

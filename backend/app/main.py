@@ -154,7 +154,7 @@ async def add_segment(session_id: str, payload: AddSegmentRequest) -> Transcript
     await session_store.add_transcript_segment(session_id, segment)
 
     # Evaluate risk
-    risk = risk_engine.evaluate_session(session)
+    matches, risk = risk_engine.evaluate_segment(segment, session=session)
     await session_store.update_risk_assessment(session_id, risk)
 
     # Broadcast via WebSocket
@@ -239,7 +239,7 @@ async def websocket_call_endpoint(websocket: WebSocket, session_id: str) -> None
                     )
                     await session_store.add_transcript_segment(session_id, segment)
 
-                    risk = risk_engine.evaluate_session(session)
+                    matches, risk = risk_engine.evaluate_segment(segment, session=session)
                     await session_store.update_risk_assessment(session_id, risk)
 
                     # Broadcast to all listeners on this session

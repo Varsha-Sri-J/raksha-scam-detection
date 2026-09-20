@@ -1,33 +1,86 @@
+import logging
 from typing import List, Optional
+import numpy as np
+
+logger = logging.getLogger("raksha.ai.embeddings")
 
 
 class EmbeddingEngine:
-    """Embedding engine stub for Phase 1.
+    """Local Sentence Transformer embedding engine for RAKSHA.
 
-    In Phase 2, this will load a lightweight Sentence Transformer model
-    (e.g., all-MiniLM-L6-v2) for local, ultra-fast embedding computation
-    without any external cloud LLM dependencies.
+    Loads a lightweight, publicly available Sentence Transformer model
+    (default: 'all-MiniLM-L6-v2') locally into memory once.
+    Fails gracefully with a clear error message if the model cannot be loaded.
     """
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
         self.model_name = model_name
+        self._model = None
         self._is_loaded = False
 
     def load_model(self) -> None:
-        """Load the local Sentence Transformer model into memory (Phase 2)."""
-        # Phase 1 stub: no-op
-        self._is_loaded = True
+        """Load the local Sentence Transformer model into memory once."""
+        if self._is_loaded and self._model is not None:
+            return
 
-    def embed_text(self, text: str) -> List[float]:
-        """Compute the embedding vector for a single text string."""
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as err:
+            raise RuntimeError(
+                "The 'sentence-transformers' package is required for RAKSHA's semantic detector. "
+                "Please install it using: pip install sentence-transformers"
+            ) from err
+
+        try:
+            logger.info("Loading SentenceTransformer model '%s'...", self.model_name)
+            self._model = SentenceTransformer(self.model_name)
+            self._is_loaded = True
+            logger.info("SentenceTransformer model '%s' loaded successfully.", self.model_name)
+        except Exception as exc:
+            self._is_loaded = False
+            self._model = None
+            raise RuntimeError(
+                f"Failed to load or download SentenceTransformer model '{self.model_name}'. "
+                f"Ensure internet connectivity for initial download or pre-cache the model locally. "
+                f"Original error: {exc}"
+            ) from exc
+
+    def embed_text(self, text: str) -> np.ndarray:
+        """Compute a normalized 1D embedding vector for a single text string."""
+        if not text or not text.strip():
+            return np.zeros(384, dtype=np.float32)
+
         if not self._is_loaded:
             self.load_model()
-        # Phase 1 stub: returns empty list until Phase 2 model loading
-        return []
 
-    def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Compute embedding vectors for a batch of texts."""
-        return [self.embed_text(t) for t in texts]
+        embedding = self._model.encode(
+            text.strip(),
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        return embedding
+
+    def embed_batch(self, texts: List[str]) -> np.ndarray:
+        """Compute normalized 2D embedding vectors for a batch of text strings."""
+        if not texts:
+            return np.empty((0, 384), dtype=np.float32)
+
+        if not self._is_loaded:
+            self.load_model()
+
+        cleaned_texts = [t.strip() if t and t.strip() else "" for t in texts]
+        embeddings = self._model.encode(
+            cleaned_texts,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        return embeddings
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._is_loaded
 
 
 # Global singleton instance
