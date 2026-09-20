@@ -199,20 +199,12 @@ async def test_neutral_transcript_no_alert():
         assert WSMessageType.ALERT_TRIGGERED not in event_types
 
 
-# --- Test H: Deepgram Provider Stub Interface ---
+# --- Test H: Deepgram Provider Interface ---
 
-@pytest.mark.asyncio
-async def test_deepgram_provider_stub():
-    """Verify DeepgramSTTProvider implements the interface and raises NotImplementedError for Phase 3A."""
-    deepgram = DeepgramSTTProvider(api_key="mock-key")
+def test_deepgram_provider_interface():
+    """Verify DeepgramSTTProvider implements BaseSTTProvider interface and parameters."""
+    deepgram = DeepgramSTTProvider(api_key="mock-key", sample_rate=8000, encoding="mulaw")
     assert deepgram.sample_rate == 8000
     assert deepgram.encoding == "mulaw"
-
-    with pytest.raises(NotImplementedError) as exc_info:
-        async for _ in deepgram.stream_transcripts(
-            session_id="session-deepgram-test",
-            input_data=None,
-        ):
-            pass
-
-    assert "Phase 3B" in str(exc_info.value)
+    assert "mock-key" not in repr(deepgram)
+    assert "***" in repr(deepgram)

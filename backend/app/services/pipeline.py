@@ -15,7 +15,11 @@ from backend.app.models import (
 )
 from backend.app.services.connection_manager import manager
 from backend.app.services.session_store import session_store
-from backend.app.services.stt import MockSTTProvider
+from backend.app.services.stt import (
+    BaseSTTProvider,
+    MockSTTProvider,
+    get_stt_provider,
+)
 from backend.app.risk_engine import risk_engine
 from ai.classifier import semantic_classifier
 
@@ -23,7 +27,7 @@ logger = logging.getLogger("raksha.backend.pipeline")
 
 
 class StreamingPipeline:
-    """Core real-time streaming pipeline for RAKSHA (Phase 3A).
+    """Core real-time streaming pipeline for RAKSHA.
 
     Processes incoming transcript segments through:
       TranscriptSegment
@@ -37,7 +41,8 @@ class StreamingPipeline:
       WebSocket Events (TRANSCRIPT_UPDATE, TACTIC_DETECTED, RISK_UPDATE, ALERT_TRIGGERED)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, stt_provider: Optional[BaseSTTProvider] = None) -> None:
+        self.stt_provider = stt_provider or get_stt_provider()
         self.mock_stt = MockSTTProvider()
 
     async def process_segment(

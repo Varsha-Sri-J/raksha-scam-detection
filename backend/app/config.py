@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,14 @@ class Settings(BaseSettings):
 
     # Risk Engine Defaults (Phase 1 Baseline)
     BASELINE_RISK_SCORE: float = 0.0
+
+    # STT Provider Configuration (Phase 3B)
+    STT_PROVIDER: str = "mock"  # "mock" or "deepgram"
+    DEEPGRAM_API_KEY: Optional[str] = None
+    DEEPGRAM_MODEL: str = "nova-2"
+    DEEPGRAM_LANGUAGE: str = "en"
+    DEEPGRAM_SAMPLE_RATE: int = 8000
+    DEEPGRAM_ENCODING: str = "mulaw"
 
     model_config = SettingsConfigDict(
         env_file=".env",

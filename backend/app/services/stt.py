@@ -1,9 +1,11 @@
 import asyncio
+import json
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
+from backend.app.config import settings
 from backend.app.models import SpeakerType, TranscriptSegment
 
 logger = logging.getLogger("raksha.backend.stt")
@@ -21,7 +23,7 @@ class BaseSTTProvider(ABC):
     async def stream_transcripts(
         self,
         session_id: str,
-        input_data: any,
+        input_data: Any,
         speaker: SpeakerType = SpeakerType.CALLER,
         delay_seconds: float = 0.0,
     ) -> AsyncIterator[TranscriptSegment]:
@@ -44,6 +46,7 @@ class MockSTTProvider(BaseSTTProvider):
 
     Accepts a list of predefined text utterances (or defaults to a realistic multi-stage
     scam script) and emits them as chronological `TranscriptSegment` objects.
+    Works completely offline with zero API keys.
     """
 
     DEFAULT_SCAM_CHUNKS: List[str] = [
@@ -82,49 +85,185 @@ class MockSTTProvider(BaseSTTProvider):
 
 
 class DeepgramSTTProvider(BaseSTTProvider):
-    """Deepgram Streaming STT Provider (Interface / Stub for Phase 3B).
+    """Deepgram Streaming Speech-to-Text Provider (Phase 3B).
 
-    Phase 3B will activate live streaming audio over WebSockets using Deepgram Nova-2.
-    Expected parameters:
-      - api_key: Deepgram API credentials (via settings.DEEPGRAM_API_KEY).
-      - encoding: Audio encoding format (e.g. 'mulaw' for Twilio or 'linear16' for raw PCM).
-      - sample_rate: Audio sampling frequency (e.g. 8000 for Twilio phone streams, 16000 for mic).
-      - channels: 1 (mono) or 2 (dual-channel caller/callee diarization).
+    Connects to Deepgram's live streaming WebSocket API (`wss://api.deepgram.com/v1/listen`)
+    to perform real-time transcription on raw audio streams (e.g., mulaw 8000Hz from Twilio
+    or linear16 PCM from microphone).
 
-    To plug in during Phase 3B:
-      Implement the WebSocket handshake with `wss://api.deepgram.com/v1/listen`,
-      stream binary audio frames from Twilio/mic, parse returned JSON transcript
-      words/alternatives, and yield `TranscriptSegment` instances.
+    Security:
+      - Never logs or exposes the raw API key.
+      - Uses settings.DEEPGRAM_API_KEY by default.
     """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        sample_rate: int = 8000,
-        encoding: str = "mulaw",
+        model: Optional[str] = None,
+        language: Optional[str] = None,
+        sample_rate: Optional[int] = None,
+        encoding: Optional[str] = None,
         channels: int = 1,
+        interim_results: bool = True,
     ) -> None:
-        self.api_key = api_key
-        self.sample_rate = sample_rate
-        self.encoding = encoding
+        self.api_key = api_key or settings.DEEPGRAM_API_KEY
+        self.model = model or settings.DEEPGRAM_MODEL
+        self.language = language or settings.DEEPGRAM_LANGUAGE
+        self.sample_rate = sample_rate or settings.DEEPGRAM_SAMPLE_RATE
+        self.encoding = encoding or settings.DEEPGRAM_ENCODING
         self.channels = channels
-        self._is_connected = False
+        self.interim_results = interim_results
+
+    def __repr__(self) -> str:
+        masked_key = "***" if self.api_key else "None"
+        return (
+            f"DeepgramSTTProvider(model='{self.model}', language='{self.language}', "
+            f"sample_rate={self.sample_rate}, encoding='{self.encoding}', api_key={masked_key})"
+        )
+
+    def build_websocket_url(self) -> str:
+        """Construct the authenticated Deepgram listen WebSocket URL with query parameters."""
+        interim_str = "true" if self.interim_results else "false"
+        return (
+            f"wss://api.deepgram.com/v1/listen?"
+            f"model={self.model}&"
+            f"language={self.language}&"
+            f"encoding={self.encoding}&"
+            f"sample_rate={self.sample_rate}&"
+            f"channels={self.channels}&"
+            f"interim_results={interim_str}&"
+            f"punctuate=true&"
+            f"smart_format=true"
+        )
+
+    @staticmethod
+    def parse_deepgram_response(
+        response_json: Dict[str, Any],
+        session_id: str,
+        speaker: SpeakerType = SpeakerType.CALLER,
+    ) -> Optional[TranscriptSegment]:
+        """Convert a Deepgram streaming JSON response into a TranscriptSegment.
+
+        Returns None if the response contains no transcript words or text.
+        """
+        if not isinstance(response_json, dict):
+            return None
+
+        # Check for results payload
+        channel_data = response_json.get("channel", {})
+        alternatives = channel_data.get("alternatives", [])
+        if not alternatives:
+            return None
+
+        primary_alt = alternatives[0]
+        transcript_text = primary_alt.get("transcript", "").strip()
+        if not transcript_text:
+            return None
+
+        is_final = bool(response_json.get("is_final", False))
+        start_time = float(response_json.get("start", time.time()))
+
+        return TranscriptSegment(
+            session_id=session_id,
+            speaker=speaker,
+            text=transcript_text,
+            timestamp=start_time if start_time > 0 else time.time(),
+            is_final=is_final,
+        )
 
     async def stream_transcripts(
         self,
         session_id: str,
-        input_data: any,
+        input_data: Any,
         speaker: SpeakerType = SpeakerType.CALLER,
         delay_seconds: float = 0.0,
     ) -> AsyncIterator[TranscriptSegment]:
-        """Stub implementation for Phase 3A. Raises NotImplementedError until Phase 3B."""
-        raise NotImplementedError(
-            "DeepgramSTTProvider is scheduled for activation in Phase 3B. "
-            "Please use MockSTTProvider for Phase 3A streaming simulation."
-        )
-        if False:
-            yield TranscriptSegment(session_id=session_id, text="")
+        """Stream audio chunks to Deepgram WebSocket and yield TranscriptSegments."""
+        if not self.api_key:
+            raise ValueError(
+                "DEEPGRAM_API_KEY is required to stream transcripts with Deepgram. "
+                "Please configure DEEPGRAM_API_KEY in .env or switch to STT_PROVIDER=mock."
+            )
+
+        try:
+            import websockets
+        except ImportError as err:
+            raise RuntimeError(
+                "The 'websockets' package is required for Deepgram streaming. "
+                "Please install it using: pip install websockets"
+            ) from err
+
+        ws_url = self.build_websocket_url()
+        headers = {"Authorization": f"Token {self.api_key}"}
+
+        try:
+            async with websockets.connect(ws_url, extra_headers=headers) as ws:
+                # Task to stream raw audio bytes into Deepgram
+                async def send_audio_stream() -> None:
+                    try:
+                        if hasattr(input_data, "__aiter__"):
+                            async for chunk in input_data:
+                                if isinstance(chunk, (bytes, bytearray)):
+                                    await ws.send(chunk)
+                                    if delay_seconds > 0:
+                                        await asyncio.sleep(delay_seconds)
+                        elif isinstance(input_data, (list, tuple)):
+                            for chunk in input_data:
+                                if isinstance(chunk, (bytes, bytearray)):
+                                    await ws.send(chunk)
+                                    if delay_seconds > 0:
+                                        await asyncio.sleep(delay_seconds)
+                        # Send close frame
+                        await ws.send(json.dumps({"type": "CloseStream"}))
+                    except Exception as exc:
+                        logger.error("Error streaming audio frames to Deepgram: %s", exc)
+
+                sender_task = asyncio.create_task(send_audio_stream())
+
+                try:
+                    async for raw_message in ws:
+                        try:
+                            msg_dict = json.loads(raw_message)
+                            segment = self.parse_deepgram_response(
+                                msg_dict, session_id=session_id, speaker=speaker
+                            )
+                            if segment:
+                                yield segment
+                        except json.JSONDecodeError:
+                            continue
+                finally:
+                    if not sender_task.done():
+                        sender_task.cancel()
+
+        except Exception as exc:
+            logger.error("Deepgram WebSocket streaming connection failed: %s", exc)
+            raise RuntimeError(
+                f"Deepgram streaming connection error: {exc}. "
+                f"Ensure internet connectivity and valid DEEPGRAM_API_KEY."
+            ) from exc
 
 
-# Global default mock provider instance
+def get_stt_provider(mode: Optional[str] = None) -> BaseSTTProvider:
+    """Factory to retrieve the active STT provider.
+
+    Resolution order:
+      1. Explicit 'mode' argument ('mock' or 'deepgram').
+      2. Environment / settings.STT_PROVIDER.
+      3. Fallback: If 'deepgram' is selected but no key is configured,
+         raises ValueError if explicitly requested, or defaults to MockSTTProvider.
+    """
+    selected_mode = (mode or settings.STT_PROVIDER or "mock").lower().strip()
+
+    if selected_mode == "deepgram":
+        if not settings.DEEPGRAM_API_KEY:
+            raise ValueError(
+                "STT_PROVIDER is configured as 'deepgram', but DEEPGRAM_API_KEY is not set. "
+                "Please configure DEEPGRAM_API_KEY in your .env or set STT_PROVIDER=mock."
+            )
+        return DeepgramSTTProvider(api_key=settings.DEEPGRAM_API_KEY)
+
+    return MockSTTProvider()
+
+
+# Global default instances
 mock_stt_provider = MockSTTProvider()
