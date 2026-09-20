@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -18,6 +18,8 @@ from backend.app.models import (
     WSMessageType,
 )
 from backend.app.risk_engine import risk_engine
+from backend.app.services.connection_manager import manager
+from backend.app.services.pipeline import streaming_pipeline
 from backend.app.services.session_store import session_store
 
 logging.basicConfig(
@@ -29,7 +31,7 @@ logger = logging.getLogger("raksha.backend")
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Real-Time Scam and Manipulation Detection Engine - Phase 1 Foundation",
+    description="Real-Time Scam and Manipulation Detection Engine - Phase 3A Streaming Pipeline",
 )
 
 # CORS Middleware
@@ -40,44 +42,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# Connection Manager for WebSockets
-class ConnectionManager:
-    def __init__(self) -> None:
-        # Maps session_id to set of active WebSockets
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
-        # Global dashboard listeners
-        self.dashboard_connections: Set[WebSocket] = set()
-        self._lock = asyncio.Lock()
-
-    async def connect_session(self, session_id: str, websocket: WebSocket) -> None:
-        await websocket.accept()
-        async with self._lock:
-            if session_id not in self.active_connections:
-                self.active_connections[session_id] = set()
-            self.active_connections[session_id].add(websocket)
-        logger.info("Client connected to session %s", session_id)
-
-    async def disconnect_session(self, session_id: str, websocket: WebSocket) -> None:
-        async with self._lock:
-            if session_id in self.active_connections:
-                self.active_connections[session_id].discard(websocket)
-                if not self.active_connections[session_id]:
-                    del self.active_connections[session_id]
-        logger.info("Client disconnected from session %s", session_id)
-
-    async def broadcast_session(self, session_id: str, message: WSMessage) -> None:
-        async with self._lock:
-            sockets = list(self.active_connections.get(session_id, set()))
-        if sockets:
-            payload = message.model_dump_json()
-            await asyncio.gather(
-                *[ws.send_text(payload) for ws in sockets], return_exceptions=True
-            )
-
-
-manager = ConnectionManager()
 
 
 # Request / Response Schemas
@@ -91,6 +55,12 @@ class AddSegmentRequest(BaseModel):
     speaker: SpeakerType = SpeakerType.UNKNOWN
     text: str
     is_final: bool = True
+
+
+class SimulateSessionRequest(BaseModel):
+    chunks: Optional[List[str]] = None
+    speaker: SpeakerType = SpeakerType.CALLER
+    delay_seconds: float = 0.0
 
 
 # --- REST Endpoints ---
@@ -140,7 +110,7 @@ async def get_session(session_id: str) -> CallSession:
 
 @app.post("/api/sessions/{session_id}/segments", response_model=TranscriptSegment, tags=["Sessions"])
 async def add_segment(session_id: str, payload: AddSegmentRequest) -> TranscriptSegment:
-    """Add a transcript segment and trigger baseline risk evaluation."""
+    """Add a transcript segment and process it through the streaming pipeline."""
     session = await session_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
@@ -151,29 +121,35 @@ async def add_segment(session_id: str, payload: AddSegmentRequest) -> Transcript
         text=payload.text,
         is_final=payload.is_final,
     )
-    await session_store.add_transcript_segment(session_id, segment)
+    result = await streaming_pipeline.process_segment(segment, broadcast=True)
+    return result["segment"]
 
-    # Evaluate risk
-    matches, risk = risk_engine.evaluate_segment(segment, session=session)
-    await session_store.update_risk_assessment(session_id, risk)
 
-    # Broadcast via WebSocket
-    await manager.broadcast_session(
-        session_id,
-        WSMessage(
-            type=WSMessageType.TRANSCRIPT_STREAM,
-            data={"segment": segment.model_dump()},
-        ),
+@app.post("/api/sessions/{session_id}/simulate", tags=["Simulation"])
+async def simulate_session(session_id: str, payload: SimulateSessionRequest) -> Dict[str, Any]:
+    """Run a mock streaming STT simulation through the RAKSHA pipeline."""
+    results = await streaming_pipeline.run_simulation(
+        session_id=session_id,
+        chunks=payload.chunks,
+        speaker=payload.speaker,
+        delay_seconds=payload.delay_seconds,
+        broadcast=True,
     )
-    await manager.broadcast_session(
-        session_id,
-        WSMessage(
-            type=WSMessageType.RISK_UPDATE,
-            data={"risk": risk.model_dump()},
-        ),
-    )
-
-    return segment
+    session = await session_store.get_session(session_id)
+    return {
+        "session_id": session_id,
+        "steps_processed": len(results),
+        "latest_risk": session.latest_risk.model_dump() if session and session.latest_risk else None,
+        "summary": [
+            {
+                "utterance": r["segment"].text,
+                "detected_tactics": [m.tactic.value for m in r["matches"]],
+                "score": r["risk"].overall_score,
+                "tier": r["risk"].risk_tier.value,
+            }
+            for r in results
+        ],
+    }
 
 
 @app.post("/api/sessions/{session_id}/end", response_model=CallSession, tags=["Sessions"])
@@ -229,7 +205,10 @@ async def websocket_call_endpoint(websocket: WebSocket, session_id: str) -> None
                         WSMessage(type=WSMessageType.PONG, data={"reply": "pong"}).model_dump_json()
                     )
 
-                elif msg_type == WSMessageType.TRANSCRIPT_STREAM.value:
+                elif msg_type in [
+                    WSMessageType.TRANSCRIPT_STREAM.value,
+                    WSMessageType.TRANSCRIPT_UPDATE.value,
+                ]:
                     payload = msg_dict.get("data", {})
                     segment = TranscriptSegment(
                         session_id=session_id,
@@ -237,26 +216,7 @@ async def websocket_call_endpoint(websocket: WebSocket, session_id: str) -> None
                         text=payload.get("text", ""),
                         is_final=payload.get("is_final", True),
                     )
-                    await session_store.add_transcript_segment(session_id, segment)
-
-                    matches, risk = risk_engine.evaluate_segment(segment, session=session)
-                    await session_store.update_risk_assessment(session_id, risk)
-
-                    # Broadcast to all listeners on this session
-                    await manager.broadcast_session(
-                        session_id,
-                        WSMessage(
-                            type=WSMessageType.TRANSCRIPT_STREAM,
-                            data={"segment": segment.model_dump()},
-                        ),
-                    )
-                    await manager.broadcast_session(
-                        session_id,
-                        WSMessage(
-                            type=WSMessageType.RISK_UPDATE,
-                            data={"risk": risk.model_dump()},
-                        ),
-                    )
+                    await streaming_pipeline.process_segment(segment, broadcast=True)
 
             except json.JSONDecodeError:
                 await websocket.send_text(

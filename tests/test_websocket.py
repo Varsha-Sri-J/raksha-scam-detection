@@ -34,9 +34,12 @@ def test_websocket_transcript_stream(client: TestClient):
             }
         })
 
-        # Expect TRANSCRIPT_STREAM broadcast
+        # Expect TRANSCRIPT_UPDATE or TRANSCRIPT_STREAM broadcast
         stream_event = websocket.receive_json()
-        assert stream_event["type"] == WSMessageType.TRANSCRIPT_STREAM.value
+        assert stream_event["type"] in [
+            WSMessageType.TRANSCRIPT_STREAM.value,
+            WSMessageType.TRANSCRIPT_UPDATE.value,
+        ]
         assert stream_event["data"]["segment"]["text"] == "Hello, this is tech support."
 
         # Expect RISK_UPDATE broadcast (baseline 0.0)
