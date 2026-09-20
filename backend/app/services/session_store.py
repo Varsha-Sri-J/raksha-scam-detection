@@ -1,0 +1,104 @@
+import asyncio
+import time
+from typing import Dict, List, Optional
+from backend.app.models import (
+    CallSession,
+    RiskAssessment,
+    SessionStatus,
+    TranscriptSegment,
+)
+
+
+class SessionStore:
+    """Thread-safe in-memory session store for call sessions."""
+
+    def __init__(self) -> None:
+        self._sessions: Dict[str, CallSession] = {}
+        self._lock = asyncio.Lock()
+
+    async def create_session(
+        self,
+        session_id: Optional[str] = None,
+        caller_id: Optional[str] = "Unknown",
+        callee_id: Optional[str] = "Protected Callee",
+    ) -> CallSession:
+        """Create and store a new CallSession."""
+        async with self._lock:
+            now = time.time()
+            session = CallSession(
+                caller_id=caller_id,
+                callee_id=callee_id,
+                status=SessionStatus.ACTIVE,
+                created_at=now,
+                updated_at=now,
+                transcript_history=[],
+                latest_risk=None,
+            )
+            if session_id:
+                session.session_id = session_id
+
+            self._sessions[session.session_id] = session
+            return session
+
+    async def get_session(self, session_id: str) -> Optional[CallSession]:
+        """Retrieve a session by its ID."""
+        async with self._lock:
+            return self._sessions.get(session_id)
+
+    async def list_sessions(self, status: Optional[SessionStatus] = None) -> List[CallSession]:
+        """List all stored sessions, optionally filtered by status."""
+        async with self._lock:
+            if status is None:
+                return list(self._sessions.values())
+            return [s for s in self._sessions.values() if s.status == status]
+
+    async def add_transcript_segment(
+        self, session_id: str, segment: TranscriptSegment
+    ) -> Optional[TranscriptSegment]:
+        """Append a transcript segment to the session history."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.transcript_history.append(segment)
+            session.updated_at = time.time()
+            return segment
+
+    async def update_risk_assessment(
+        self, session_id: str, assessment: RiskAssessment
+    ) -> Optional[RiskAssessment]:
+        """Update the latest risk assessment for a session."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.latest_risk = assessment
+            session.updated_at = time.time()
+            return assessment
+
+    async def end_session(self, session_id: str) -> Optional[CallSession]:
+        """Mark a session as ENDED."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.status = SessionStatus.ENDED
+            session.updated_at = time.time()
+            return session
+
+    async def delete_session(self, session_id: str) -> bool:
+        """Remove a session from storage."""
+        async with self._lock:
+            if session_id in self._sessions:
+                del self._sessions[session_id]
+                return True
+            return False
+
+    async def clear(self) -> None:
+        """Clear all sessions (useful for test teardown)."""
+        async with self._lock:
+            self._sessions.clear()
+
+
+# Global singleton instance
+session_store = SessionStore()
