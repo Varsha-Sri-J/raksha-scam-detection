@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Set
+from typing import Dict, List, Set
 from fastapi import WebSocket
 from backend.app.models import WSMessage
 
@@ -38,9 +38,33 @@ class ConnectionManager:
             sockets = list(self.active_connections.get(session_id, set()))
         if sockets:
             payload = message.model_dump_json()
-            await asyncio.gather(
+            results = await asyncio.gather(
                 *[ws.send_text(payload) for ws in sockets], return_exceptions=True
             )
+            # Detect failed / dead sockets
+            dead_sockets = [
+                ws for ws, res in zip(sockets, results) if isinstance(res, Exception)
+            ]
+            if dead_sockets:
+                async with self._lock:
+                    if session_id in self.active_connections:
+                        for ws in dead_sockets:
+                            self.active_connections[session_id].discard(ws)
+                        if not self.active_connections[session_id]:
+                            del self.active_connections[session_id]
+                logger.warning(
+                    "Pruned %d dead sockets for session %s", len(dead_sockets), session_id
+                )
+
+    async def get_connection_count(self, session_id: str) -> int:
+        """Return the number of active WebSocket connections for a session."""
+        async with self._lock:
+            return len(self.active_connections.get(session_id, set()))
+
+    async def get_active_sessions(self) -> List[str]:
+        """Return a list of all session IDs with at least one active connection."""
+        async with self._lock:
+            return list(self.active_connections.keys())
 
 
 # Global singleton instance

@@ -61,20 +61,39 @@ class StreamingPipeline:
         # 2. Append segment to session history
         await session_store.add_transcript_segment(session_id, segment)
 
-        # 3. Classify segment using Phase 2A semantic classifier
-        matches: List[TacticMatch] = semantic_classifier.classify_segment(segment)
+        # 3. Classify segment using Phase 2A semantic classifier (non-blocking in worker thread)
+        matches: List[TacticMatch] = []
+        classification_error: Optional[str] = None
+        try:
+            matches = await asyncio.to_thread(semantic_classifier.classify_segment, segment)
+        except Exception as exc:
+            classification_error = str(exc)
+            logger.exception("Semantic classification failed for session %s: %s", session_id, exc)
 
         # 4. Compute updated risk using Phase 2B dynamic risk engine
         prev_risk = session.latest_risk
-        updated_risk: RiskAssessment = risk_engine.calculate_risk(
-            session_id=session_id,
-            new_matches=matches,
-            previous_assessment=prev_risk,
-        )
+        updated_risk: Optional[RiskAssessment] = None
+        risk_error: Optional[str] = None
+        try:
+            if classification_error is not None:
+                # Do not fabricate risk when classification fails; preserve last valid assessment
+                updated_risk = prev_risk or risk_engine.evaluate_session(session)
+            else:
+                updated_risk = risk_engine.calculate_risk(
+                    session_id=session_id,
+                    new_matches=matches,
+                    previous_assessment=prev_risk,
+                )
+        except Exception as exc:
+            risk_error = str(exc)
+            logger.exception("Risk calculation failed for session %s: %s", session_id, exc)
+            # Preserve last valid assessment without fabricating new score
+            updated_risk = prev_risk or risk_engine.evaluate_session(session)
 
         # 5. Persist updated risk in session store
-        await session_store.update_risk_assessment(session_id, updated_risk)
-        session.latest_risk = updated_risk
+        if updated_risk:
+            await session_store.update_risk_assessment(session_id, updated_risk)
+            session.latest_risk = updated_risk
 
         # 6. Construct structured events
         events: List[WSMessage] = []
@@ -85,6 +104,18 @@ class StreamingPipeline:
             data={"segment": segment.model_dump()},
         )
         events.append(transcript_event)
+
+        # Event: ERROR (if classification failed)
+        if classification_error:
+            events.append(
+                WSMessage(
+                    type=WSMessageType.ERROR,
+                    data={
+                        "session_id": session_id,
+                        "error": f"Semantic classification error: {classification_error}",
+                    },
+                )
+            )
 
         # Event: TACTIC_DETECTED (if any tactics matched this segment)
         if matches:
@@ -98,15 +129,28 @@ class StreamingPipeline:
             )
             events.append(tactic_event)
 
+        # Event: ERROR (if risk evaluation failed)
+        if risk_error:
+            events.append(
+                WSMessage(
+                    type=WSMessageType.ERROR,
+                    data={
+                        "session_id": session_id,
+                        "error": f"Risk engine error: {risk_error}",
+                    },
+                )
+            )
+
         # Event: RISK_UPDATE
-        risk_event = WSMessage(
-            type=WSMessageType.RISK_UPDATE,
-            data={"risk": updated_risk.model_dump()},
-        )
-        events.append(risk_event)
+        if updated_risk:
+            risk_event = WSMessage(
+                type=WSMessageType.RISK_UPDATE,
+                data={"risk": updated_risk.model_dump()},
+            )
+            events.append(risk_event)
 
         # Event: ALERT_TRIGGERED (when risk tier reaches HIGH or CRITICAL)
-        if updated_risk.risk_tier in [RiskTier.HIGH, RiskTier.CRITICAL]:
+        if updated_risk and updated_risk.risk_tier in [RiskTier.HIGH, RiskTier.CRITICAL]:
             alert_event = WSMessage(
                 type=WSMessageType.ALERT_TRIGGERED,
                 data={

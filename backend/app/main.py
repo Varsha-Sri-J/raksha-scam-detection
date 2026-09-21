@@ -198,6 +198,15 @@ async def websocket_call_endpoint(websocket: WebSocket, session_id: str) -> None
             raw_data = await websocket.receive_text()
             try:
                 msg_dict = json.loads(raw_data)
+                if not isinstance(msg_dict, dict):
+                    await websocket.send_text(
+                        WSMessage(
+                            type=WSMessageType.ERROR,
+                            data={"error": "JSON payload must be an object"},
+                        ).model_dump_json()
+                    )
+                    continue
+
                 msg_type = msg_dict.get("type")
 
                 if msg_type == WSMessageType.PING.value:
@@ -210,13 +219,46 @@ async def websocket_call_endpoint(websocket: WebSocket, session_id: str) -> None
                     WSMessageType.TRANSCRIPT_UPDATE.value,
                 ]:
                     payload = msg_dict.get("data", {})
+                    if not isinstance(payload, dict):
+                        await websocket.send_text(
+                            WSMessage(
+                                type=WSMessageType.ERROR,
+                                data={"error": "Field 'data' must be an object"},
+                            ).model_dump_json()
+                        )
+                        continue
+
+                    speaker_raw = payload.get("speaker", SpeakerType.UNKNOWN.value)
+                    try:
+                        speaker = SpeakerType(speaker_raw)
+                    except (ValueError, KeyError):
+                        speaker = SpeakerType.UNKNOWN
+
+                    text_val = payload.get("text", "")
+                    if not isinstance(text_val, str) or not text_val.strip():
+                        await websocket.send_text(
+                            WSMessage(
+                                type=WSMessageType.ERROR,
+                                data={"error": "Field 'text' must be a non-empty string"},
+                            ).model_dump_json()
+                        )
+                        continue
+
                     segment = TranscriptSegment(
                         session_id=session_id,
-                        speaker=SpeakerType(payload.get("speaker", SpeakerType.UNKNOWN.value)),
-                        text=payload.get("text", ""),
-                        is_final=payload.get("is_final", True),
+                        speaker=speaker,
+                        text=text_val.strip(),
+                        is_final=bool(payload.get("is_final", True)),
                     )
                     await streaming_pipeline.process_segment(segment, broadcast=True)
+
+                else:
+                    await websocket.send_text(
+                        WSMessage(
+                            type=WSMessageType.ERROR,
+                            data={"error": f"Unsupported message type: {msg_type}"},
+                        ).model_dump_json()
+                    )
 
             except json.JSONDecodeError:
                 await websocket.send_text(
@@ -228,5 +270,5 @@ async def websocket_call_endpoint(websocket: WebSocket, session_id: str) -> None
     except WebSocketDisconnect:
         await manager.disconnect_session(session_id, websocket)
     except Exception as exc:
-        logger.exception("Unexpected error in websocket loop: %s", exc)
+        logger.exception("Unexpected error in websocket loop for session %s: %s", session_id, exc)
         await manager.disconnect_session(session_id, websocket)
