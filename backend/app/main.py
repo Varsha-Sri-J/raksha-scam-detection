@@ -3,7 +3,17 @@ import json
 import logging
 import time
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from urllib.parse import parse_qs
+from fastapi import (
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -21,6 +31,7 @@ from backend.app.risk_engine import risk_engine
 from backend.app.services.connection_manager import manager
 from backend.app.services.pipeline import streaming_pipeline
 from backend.app.services.session_store import session_store
+from backend.app.services.twilio_service import twilio_service
 
 logging.basicConfig(
     level=logging.INFO if not settings.DEBUG else logging.DEBUG,
@@ -272,3 +283,181 @@ async def websocket_call_endpoint(websocket: WebSocket, session_id: str) -> None
     except Exception as exc:
         logger.exception("Unexpected error in websocket loop for session %s: %s", session_id, exc)
         await manager.disconnect_session(session_id, websocket)
+
+
+# --- Twilio Voice Webhooks & Media Stream (Phase 5A) ---
+
+
+async def _parse_form_payload(request: Request) -> Dict[str, str]:
+    """Parse application/x-www-form-urlencoded or JSON request body safely without extra dependencies."""
+    body_bytes = await request.body()
+    if not body_bytes:
+        return {}
+    body_text = body_bytes.decode("utf-8", errors="replace")
+    # 1. Try urlencoded form parsing (Twilio standard)
+    parsed = parse_qs(body_text)
+    if parsed:
+        return {k: v[0] if isinstance(v, list) and len(v) > 0 else "" for k, v in parsed.items()}
+    # 2. Try JSON fallback
+    try:
+        json_obj = json.loads(body_text)
+        if isinstance(json_obj, dict):
+            return {str(k): str(v) for k, v in json_obj.items()}
+    except Exception:
+        pass
+    return {}
+
+
+@app.post("/api/twilio/voice/incoming", tags=["Twilio"])
+async def twilio_incoming_voice(
+    request: Request,
+    x_twilio_signature: Optional[str] = Header(None, alias="X-Twilio-Signature"),
+) -> Response:
+    """Twilio Voice webhook for inbound calls.
+
+    Initializes a CallSession for the CallSid and returns TwiML instructions
+    to connect the call audio to the RAKSHA Media Stream WebSocket.
+    """
+    form_data = await _parse_form_payload(request)
+    call_sid = form_data.get("CallSid", "")
+    if not call_sid:
+        raise HTTPException(status_code=400, detail="Missing CallSid in request")
+
+    from_number = form_data.get("From", "Unknown")
+    to_number = form_data.get("To", "Protected Callee")
+
+    # Validate signature if configured
+    if not twilio_service.verify_twilio_signature(
+        str(request.url), form_data, x_twilio_signature
+    ):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    # Create or retrieve CallSession using CallSid as session_id
+    session = await session_store.get_session(call_sid)
+    if not session:
+        session = await session_store.create_session(
+            session_id=call_sid,
+            caller_id=from_number or "Unknown",
+            callee_id=to_number or "Protected Callee",
+        )
+        baseline_risk = risk_engine.evaluate_session(session)
+        await session_store.update_risk_assessment(call_sid, baseline_risk)
+        session.latest_risk = baseline_risk
+
+    # Derive WebSocket stream URL
+    if settings.TWILIO_STREAM_BASE_URL:
+        stream_url = f"{settings.TWILIO_STREAM_BASE_URL.rstrip('/')}/ws/twilio/media/{call_sid}"
+    else:
+        ws_scheme = "wss" if request.url.scheme == "https" else "ws"
+        stream_url = f"{ws_scheme}://{request.url.netloc}/ws/twilio/media/{call_sid}"
+
+    twiml_content = twilio_service.generate_twiml_response(
+        stream_url=stream_url,
+        session_id=call_sid,
+    )
+    return Response(content=twiml_content, media_type="application/xml")
+
+
+@app.post("/api/twilio/voice/status", tags=["Twilio"])
+async def twilio_voice_status(
+    request: Request,
+    x_twilio_signature: Optional[str] = Header(None, alias="X-Twilio-Signature"),
+) -> Dict[str, Any]:
+    """Twilio Voice status callback webhook.
+
+    Tracks call state transitions and marks sessions as ENDED when completed.
+    """
+    form_data = await _parse_form_payload(request)
+    call_sid = form_data.get("CallSid", "")
+    call_status = form_data.get("CallStatus", "")
+
+    if not twilio_service.verify_twilio_signature(
+        str(request.url), form_data, x_twilio_signature
+    ):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    terminal_statuses = {"completed", "failed", "busy", "no-answer", "canceled"}
+    if call_status.lower() in terminal_statuses:
+        session = await session_store.end_session(call_sid)
+        if session:
+            await manager.broadcast_session(
+                call_sid,
+                WSMessage(
+                    type=WSMessageType.SESSION_STATUS,
+                    data={"status": SessionStatus.ENDED.value},
+                ),
+            )
+            logger.info("Twilio call %s ended with status %s", call_sid, call_status)
+
+    return {
+        "status": "ok",
+        "session_id": call_sid,
+        "call_status": call_status,
+    }
+
+
+@app.websocket("/ws/twilio/media/{session_id}")
+async def twilio_media_stream_endpoint(websocket: WebSocket, session_id: str) -> None:
+    """Twilio Media Stream WebSocket endpoint for receiving live call audio frames.
+
+    Phase 5A implements the connection lifecycle, event parsing, and payload decoding.
+    The audio bridge to Deepgram STT is deferred to Phase 5B.
+    """
+    await websocket.accept()
+    logger.info("Twilio Media Stream connected for session %s", session_id)
+
+    # Ensure session exists in session_store
+    session = await session_store.get_session(session_id)
+    if not session:
+        session = await session_store.create_session(session_id=session_id)
+        baseline_risk = risk_engine.evaluate_session(session)
+        await session_store.update_risk_assessment(session_id, baseline_risk)
+        session.latest_risk = baseline_risk
+
+    try:
+        while True:
+            raw_data = await websocket.receive_text()
+            event_type, msg_dict = twilio_service.parse_media_stream_message(raw_data)
+
+            if event_type is None:
+                logger.warning(
+                    "Received malformed Twilio media stream message on session %s",
+                    session_id,
+                )
+                continue
+
+            if event_type == "connected":
+                logger.info("Twilio media stream connected for session %s", session_id)
+
+            elif event_type == "start":
+                start_data = msg_dict.get("start", {})
+                stream_sid = start_data.get("streamSid")
+                logger.info(
+                    "Twilio media stream started: streamSid=%s for session %s",
+                    stream_sid,
+                    session_id,
+                )
+
+            elif event_type == "media":
+                media_data = msg_dict.get("media", {})
+                payload_b64 = media_data.get("payload", "")
+                audio_bytes = twilio_service.decode_media_payload(payload_b64)
+                if audio_bytes is None:
+                    logger.warning(
+                        "Received invalid base64 media payload on session %s", session_id
+                    )
+                # Phase 5A: Audio validation complete. Deepgram bridge deferred to Phase 5B.
+
+            elif event_type == "stop":
+                logger.info("Twilio media stream stopped for session %s", session_id)
+                break
+
+    except WebSocketDisconnect:
+        logger.info("Twilio Media Stream disconnected for session %s", session_id)
+    except Exception as exc:
+        logger.exception(
+            "Unexpected error in Twilio Media Stream for session %s: %s",
+            session_id,
+            exc,
+        )
+

@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     DEEPGRAM_SAMPLE_RATE: int = 8000
     DEEPGRAM_ENCODING: str = "mulaw"
 
+    # Twilio Configuration (Phase 5A)
+    TWILIO_ACCOUNT_SID: Optional[str] = None
+    TWILIO_AUTH_TOKEN: Optional[str] = None
+    TWILIO_PHONE_NUMBER: Optional[str] = None
+    TWILIO_STREAM_BASE_URL: Optional[str] = None
+    TWILIO_VALIDATE_SIGNATURE: bool = False
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
