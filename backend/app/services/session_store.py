@@ -10,6 +10,7 @@ from backend.app.models import (
     SessionStatus,
     TranscriptSegment,
     UserWarningRecord,
+    UserWarningStatus,
 )
 
 
@@ -128,6 +129,34 @@ class SessionStore:
             session.updated_at = time.time()
             return record
 
+    async def update_user_warning_status(
+        self,
+        session_id: str,
+        warning_id: str,
+        status: UserWarningStatus,
+        error: Optional[str] = None,
+    ) -> Optional[UserWarningRecord]:
+        """Update the status of a specific user warning record matching warning_id.
+
+        Enforces deterministic correlation: only updates the record if warning_id
+        strictly matches. Never updates by position or timing.
+        """
+        if not warning_id:
+            return None
+
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            for rec in session.user_warning_history:
+                if rec.warning_id == warning_id:
+                    rec.status = status
+                    if error is not None:
+                        rec.error = error
+                    session.updated_at = time.time()
+                    return rec
+            return None
+
     MAX_INTERVENTION_HISTORY: int = 100
 
     async def add_intervention_record(
@@ -162,6 +191,35 @@ class SessionStore:
                 del self._sessions[session_id]
                 return True
             return False
+
+    async def find_session_by_conference(
+        self,
+        conference_name: Optional[str] = None,
+        conference_sid: Optional[str] = None,
+        call_sid: Optional[str] = None,
+    ) -> Optional[CallSession]:
+        """Deterministically look up a session by conference room name, conference SID, or call SID."""
+        async with self._lock:
+            # 1. Deterministic extraction from conference_name if format is raksha_conf_{session_id}
+            if conference_name and conference_name.startswith("raksha_conf_"):
+                derived_id = conference_name[len("raksha_conf_") :]
+                if derived_id in self._sessions:
+                    return self._sessions[derived_id]
+
+            # 2. Direct session_id match
+            if call_sid and call_sid in self._sessions:
+                return self._sessions[call_sid]
+
+            # 3. Targeted scan across stored sessions for child call, conference_sid, or exact name
+            for s in self._sessions.values():
+                if conference_sid and s.conference_sid == conference_sid:
+                    return s
+                if call_sid and (s.protected_user_call_sid == call_sid or s.parent_call_sid == call_sid):
+                    return s
+                if conference_name and s.conference_name == conference_name:
+                    return s
+
+            return None
 
     async def clear(self) -> None:
         """Clear all sessions (useful for test teardown)."""

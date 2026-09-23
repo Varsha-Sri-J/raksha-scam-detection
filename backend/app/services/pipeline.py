@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import time
 from typing import Any, Dict, List, Optional
@@ -130,14 +131,18 @@ class StreamingPipeline:
                     "Caregiver notification dispatch failed for session %s: %s", session_id, exc
                 )
 
-        # 8. Evaluate and dispatch protected-user warning if eligible (Phase 7C)
+        # 8. Evaluate and dispatch protected-user warning if eligible (Phase 7C / 7D-3C-2)
         user_warning_record: Optional[UserWarningRecord] = None
         if session and protection_decision:
             try:
-                user_warning_record = protected_user_warning_service.warn_user(
+                res = protected_user_warning_service.warn_user(
                     session=session,
                     decision=protection_decision,
                 )
+                if inspect.isawaitable(res):
+                    user_warning_record = await res
+                else:
+                    user_warning_record = res
                 if user_warning_record:
                     await session_store.add_user_warning_record(session_id, user_warning_record)
             except Exception as exc:

@@ -175,6 +175,7 @@ class UserWarningRecord(BaseModel):
 class UserWarningResult(BaseModel):
     success: bool
     warning_id: Optional[str] = None
+    status: Optional[UserWarningStatus] = None
     error: Optional[str] = None
     provider: str = "mock"
 
@@ -224,6 +225,16 @@ class CallSession(BaseModel):
     notification_history: List[NotificationRecord] = Field(default_factory=list)
     user_warning_history: List[UserWarningRecord] = Field(default_factory=list)
     intervention_history: List[InterventionRecord] = Field(default_factory=list)
+
+    # Telephony Topology & Conference State (Phase 7D-3)
+    parent_call_sid: Optional[str] = None
+    protected_user_call_sid: Optional[str] = None
+    conference_sid: Optional[str] = None
+    conference_name: Optional[str] = None
+    stream_sid: Optional[str] = None
+    protected_user_phone_number: Optional[str] = None
+    call_topology: str = "standard"
+    protected_user_connected: bool = False
 
 
 class WSMessageType(str, Enum):

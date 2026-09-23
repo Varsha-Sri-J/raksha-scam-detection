@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # Intervention Provider Configuration (Phase 7D-2)
     INTERVENTION_PROVIDER: str = "mock"  # "mock" or "twilio"
 
+    # User Warning Provider Configuration (Phase 7D-3)
+    USER_WARNING_PROVIDER: str = "mock"  # "mock" or "twilio_conference" (Phase 7D-3C-2)
+    PROTECTED_USER_PHONE_NUMBER: Optional[str] = None  # Demo/hackathon destination number
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -35,7 +35,7 @@ def test_incoming_webhook_creates_session_and_returns_twiml(client: TestClient):
     assert "application/xml" in response.headers["content-type"]
     xml_content = response.text
     assert "<Response>" in xml_content
-    assert "<Connect>" in xml_content
+    assert "<Connect>" in xml_content or ("<Start>" in xml_content and "<Conference" in xml_content)
     assert "<Stream" in xml_content
     assert f"/ws/twilio/media/{call_sid}" in xml_content
     assert f'value="{call_sid}"' in xml_content

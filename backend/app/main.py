@@ -3,7 +3,7 @@ import json
 import logging
 import time
 from typing import Any, Dict, List, Optional
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 from fastapi import (
     FastAPI,
     Header,
@@ -24,6 +24,7 @@ from backend.app.models import (
     SessionStatus,
     SpeakerType,
     TranscriptSegment,
+    UserWarningStatus,
     WSMessage,
     WSMessageType,
 )
@@ -32,7 +33,7 @@ from backend.app.services.connection_manager import manager
 from backend.app.services.pipeline import streaming_pipeline
 from backend.app.services.session_store import session_store
 from backend.app.services.stt import get_stt_provider
-from backend.app.services.twilio_service import twilio_service
+from backend.app.services.twilio_service import get_conference_room_name, twilio_service
 
 logging.basicConfig(
     level=logging.INFO if not settings.DEBUG else logging.DEBUG,
@@ -314,10 +315,14 @@ async def twilio_incoming_voice(
     request: Request,
     x_twilio_signature: Optional[str] = Header(None, alias="X-Twilio-Signature"),
 ) -> Response:
-    """Twilio Voice webhook for inbound calls.
+    """Twilio Voice webhook for inbound calls (Phase 7D-3).
 
-    Initializes a CallSession for the CallSid and returns TwiML instructions
-    to connect the call audio to the RAKSHA Media Stream WebSocket.
+    Initializes a CallSession for the CallSid with Conference topology.
+    Returns TwiML instructions to:
+      1. Asynchronously fork inbound caller audio to the Media Stream WebSocket (<Start><Stream track="inbound_track">).
+      2. Bridge the inbound caller into the shared conference room (<Dial><Conference participantLabel="scammer">).
+    Simultaneously dispatches an outbound call to the protected user (if configured)
+    to place them into the same conference.
     """
     form_data = await _parse_form_payload(request)
     call_sid = form_data.get("CallSid", "")
@@ -333,6 +338,8 @@ async def twilio_incoming_voice(
     ):
         raise HTTPException(status_code=403, detail="Invalid Twilio signature")
 
+    conference_name = get_conference_room_name(call_sid)
+
     # Create or retrieve CallSession using CallSid as session_id
     session = await session_store.get_session(call_sid)
     if not session:
@@ -345,6 +352,13 @@ async def twilio_incoming_voice(
         await session_store.update_risk_assessment(call_sid, baseline_risk)
         session.latest_risk = baseline_risk
 
+    # Update conference and topology metadata on session
+    session.parent_call_sid = call_sid
+    session.conference_name = conference_name
+    session.call_topology = "conference"
+    session.protected_user_phone_number = settings.PROTECTED_USER_PHONE_NUMBER
+    session.protected_user_connected = False
+
     # Derive WebSocket stream URL
     if settings.TWILIO_STREAM_BASE_URL:
         stream_url = f"{settings.TWILIO_STREAM_BASE_URL.rstrip('/')}/ws/twilio/media/{call_sid}"
@@ -352,10 +366,331 @@ async def twilio_incoming_voice(
         ws_scheme = "wss" if request.url.scheme == "https" else "ws"
         stream_url = f"{ws_scheme}://{request.url.netloc}/ws/twilio/media/{call_sid}"
 
-    twiml_content = twilio_service.generate_twiml_response(
+    # Derive Conference and Outbound Status Callback URLs
+    http_scheme = request.url.scheme
+    conf_status_url = f"{http_scheme}://{request.url.netloc}/api/twilio/conference/status"
+    outbound_status_url = f"{http_scheme}://{request.url.netloc}/api/twilio/voice/outbound-status"
+
+    twiml_content = twilio_service.generate_conference_twiml(
         stream_url=stream_url,
         session_id=call_sid,
+        conference_name=conference_name,
+        status_callback_url=conf_status_url,
     )
+
+    # Asynchronously dispatch outbound call to protected user if destination number is configured
+    protected_dest = settings.PROTECTED_USER_PHONE_NUMBER
+    if protected_dest and protected_dest.strip():
+        async def _dispatch_protected_user_call():
+            try:
+                success, callee_call_sid, err = await twilio_service.create_outbound_call(
+                    to_phone_number=protected_dest.strip(),
+                    conference_name=conference_name,
+                    status_callback_url=outbound_status_url,
+                )
+                if success and callee_call_sid:
+                    session.protected_user_call_sid = callee_call_sid
+                    logger.info(
+                        "Dispatched protected user outbound call %s for session %s",
+                        callee_call_sid,
+                        call_sid,
+                    )
+                else:
+                    logger.warning(
+                        "Failed to dispatch protected user call for session %s: %s",
+                        call_sid,
+                        err,
+                    )
+            except Exception as exc:
+                logger.exception(
+                    "Unexpected error dispatching protected user call for session %s: %s",
+                    call_sid,
+                    exc,
+                )
+
+        asyncio.create_task(_dispatch_protected_user_call())
+    else:
+        logger.warning(
+            "PROTECTED_USER_PHONE_NUMBER not configured; skipping outbound call for session %s",
+            call_sid,
+        )
+
+    return Response(content=twiml_content, media_type="application/xml")
+
+
+@app.post("/api/twilio/voice/outbound-status", tags=["Twilio"])
+async def twilio_outbound_status(
+    request: Request,
+    x_twilio_signature: Optional[str] = Header(None, alias="X-Twilio-Signature"),
+) -> Dict[str, Any]:
+    """Twilio Voice status callback webhook for the protected user outbound leg.
+
+    Tracks call state transitions (ringing, answered, completed, etc.)
+    and updates protected_user_connected state.
+    """
+    form_data = await _parse_form_payload(request)
+    call_sid = form_data.get("CallSid", "")
+    call_status = form_data.get("CallStatus", "")
+
+    if not twilio_service.verify_twilio_signature(
+        str(request.url), form_data, x_twilio_signature
+    ):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    session = await session_store.find_session_by_conference(call_sid=call_sid)
+    if session:
+        call_status_lower = call_status.lower()
+        if call_status_lower in ["answered", "in-progress"]:
+            session.protected_user_connected = True
+            logger.info(
+                "Protected user answered call %s for session %s",
+                call_sid,
+                session.session_id,
+            )
+        elif call_status_lower in ["completed", "failed", "busy", "no-answer", "canceled"]:
+            session.protected_user_connected = False
+            logger.info(
+                "Protected user call %s ended with status %s for session %s",
+                call_sid,
+                call_status,
+                session.session_id,
+            )
+
+    return {
+        "status": "ok",
+        "call_sid": call_sid,
+        "call_status": call_status,
+    }
+
+
+@app.post("/api/twilio/conference/status", tags=["Twilio"])
+async def twilio_conference_status(
+    request: Request,
+    x_twilio_signature: Optional[str] = Header(None, alias="X-Twilio-Signature"),
+) -> Dict[str, Any]:
+    """Twilio Conference status callback webhook.
+
+    Authoritative for conference lifecycle because scammer leg configures:
+    statusCallbackEvent="start end join leave announcement"
+    """
+    form_data = await _parse_form_payload(request)
+    conf_sid = form_data.get("ConferenceSid", "")
+    friendly_name = form_data.get("FriendlyName", "")
+    call_sid = form_data.get("CallSid", "")
+    participant_label = form_data.get("ParticipantLabel", "")
+    event = form_data.get("StatusCallbackEvent", "")
+    announcement_status = form_data.get("AnnouncementStatus", "")
+
+    if not twilio_service.verify_twilio_signature(
+        str(request.url), form_data, x_twilio_signature
+    ):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    session = await session_store.find_session_by_conference(
+        conference_name=friendly_name,
+        conference_sid=conf_sid,
+        call_sid=call_sid,
+    )
+
+    if session:
+        if conf_sid and not session.conference_sid:
+            session.conference_sid = conf_sid
+
+        if event == "start":
+            logger.info(
+                "Conference %s (%s) started for session %s",
+                conf_sid,
+                friendly_name,
+                session.session_id,
+            )
+
+        elif event == "join":
+            logger.info(
+                "Participant %s (%s) joined conference %s for session %s",
+                call_sid,
+                participant_label,
+                conf_sid,
+                session.session_id,
+            )
+            if participant_label == "protected_user":
+                session.protected_user_connected = True
+                if not session.protected_user_call_sid and call_sid:
+                    session.protected_user_call_sid = call_sid
+
+        elif event == "leave":
+            logger.info(
+                "Participant %s (%s) left conference %s for session %s",
+                call_sid,
+                participant_label,
+                conf_sid,
+                session.session_id,
+            )
+            if participant_label == "protected_user":
+                session.protected_user_connected = False
+
+        elif event == "end":
+            logger.info("Conference %s ended for session %s", conf_sid, session.session_id)
+            session.protected_user_connected = False
+            ended_session = await session_store.end_session(session.session_id)
+            if ended_session:
+                await manager.broadcast_session(
+                    session.session_id,
+                    WSMessage(
+                        type=WSMessageType.SESSION_STATUS,
+                        data={"status": SessionStatus.ENDED.value},
+                    ),
+                )
+
+        elif event == "announcement":
+            logger.info(
+                "Announcement callback on conference %s for participant %s: status=%s",
+                conf_sid,
+                call_sid,
+                announcement_status,
+            )
+            # User Correction 2: Extract warning_id from AnnouncementUrl or query params
+            # for deterministic correlation. Never update based on position or timing.
+            announce_url_param = (
+                form_data.get("AnnouncementUrl") or form_data.get("AnnounceUrl") or ""
+            )
+            parsed_warning_id = None
+            if announce_url_param:
+                parsed_url = urlparse(announce_url_param)
+                query_params = parse_qs(parsed_url.query)
+                if "warning_id" in query_params and query_params["warning_id"]:
+                    parsed_warning_id = query_params["warning_id"][0]
+
+            if not parsed_warning_id:
+                parsed_warning_id = form_data.get("WarningId") or request.query_params.get("warning_id")
+
+            if not parsed_warning_id:
+                logger.warning(
+                    "Announcement callback on conference %s lacks deterministic warning_id correlation; leaving warning records untouched",
+                    conf_sid,
+                )
+            elif (
+                call_sid
+                and session.protected_user_call_sid
+                and call_sid != session.protected_user_call_sid
+            ):
+                logger.warning(
+                    "Announcement callback participant %s does not match protected_user_call_sid %s; skipping correlation",
+                    call_sid,
+                    session.protected_user_call_sid,
+                )
+            else:
+                status_norm = (announcement_status or form_data.get("Status") or "").strip().lower()
+                if status_norm in ["completed", "announcement-end", "success", "delivered"]:
+                    updated = await session_store.update_user_warning_status(
+                        session.session_id,
+                        warning_id=parsed_warning_id,
+                        status=UserWarningStatus.DELIVERED,
+                    )
+                    if updated:
+                        logger.info(
+                            "Deterministic correlation: marked warning %s as DELIVERED for session %s",
+                            parsed_warning_id,
+                            session.session_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Warning %s not found in history for session %s; leaving records untouched",
+                            parsed_warning_id,
+                            session.session_id,
+                        )
+                elif status_norm in ["failed", "announcement-fail", "canceled", "error"]:
+                    err_msg = (
+                        form_data.get("ErrorMessage") or f"Announcement failed with status {status_norm}"
+                    )
+                    updated = await session_store.update_user_warning_status(
+                        session.session_id,
+                        warning_id=parsed_warning_id,
+                        status=UserWarningStatus.FAILED,
+                        error=err_msg,
+                    )
+                    if updated:
+                        logger.info(
+                            "Deterministic correlation: marked warning %s as FAILED for session %s",
+                            parsed_warning_id,
+                            session.session_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Warning %s not found in history for session %s; leaving records untouched",
+                            parsed_warning_id,
+                            session.session_id,
+                        )
+                else:
+                    logger.warning(
+                        "Announcement callback on conference %s for session %s has ambiguous status '%s'; leaving warning records untouched",
+                        conf_sid,
+                        session.session_id,
+                        status_norm,
+                    )
+
+    return {
+        "status": "ok",
+        "conference_sid": conf_sid,
+        "event": event,
+    }
+
+
+@app.post("/api/twilio/voice/warning-twiml/{session_id}", tags=["Twilio"])
+async def twilio_warning_twiml(
+    session_id: str,
+    request: Request,
+    x_twilio_signature: Optional[str] = Header(None, alias="X-Twilio-Signature"),
+) -> Response:
+    """Twilio Voice webhook delivering canonical protected-user warning TwiML.
+
+    Executed strictly by Twilio Conference Participant AnnounceUrl on the protected-user leg.
+    Guarantees:
+    - Validates Twilio signature using twilio_service.verify_twilio_signature.
+    - Resolves CallSession; returns 404 if not found.
+    - Resolves canonical warning message from session's existing protected-user warning state.
+    - Returns 400 if no canonical warning exists (never invents text).
+    - Ignores arbitrary text or risk score inputs from HTTP query/body parameters.
+    - Returns XML with <Say voice="Polly.Aditi" language="en-IN">.
+    """
+    form_data = await _parse_form_payload(request)
+
+    # 1. Validate Twilio signature
+    if not twilio_service.verify_twilio_signature(
+        str(request.url), form_data, x_twilio_signature
+    ):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    # 2. Resolve CallSession
+    session = await session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"CallSession {session_id} not found")
+
+    # 3. Determine canonical warning from session's existing protected-user warning history
+    if not session.user_warning_history:
+        logger.warning(
+            "Rejecting warning TwiML request for session %s: No active canonical warning found",
+            session_id,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=f"No active canonical warning found for session {session_id}",
+        )
+
+    # Retrieve canonical warning message from warning record
+    warning_id = request.query_params.get("warning_id")
+    target_record = None
+    if warning_id:
+        for rec in reversed(session.user_warning_history):
+            if rec.warning_id == warning_id:
+                target_record = rec
+                break
+
+    if not target_record:
+        target_record = session.user_warning_history[-1]
+
+    canonical_message = target_record.message
+    twiml_content = twilio_service.generate_warning_twiml(canonical_message)
+
     return Response(content=twiml_content, media_type="application/xml")
 
 
@@ -364,7 +699,7 @@ async def twilio_voice_status(
     request: Request,
     x_twilio_signature: Optional[str] = Header(None, alias="X-Twilio-Signature"),
 ) -> Dict[str, Any]:
-    """Twilio Voice status callback webhook.
+    """Twilio Voice status callback webhook for inbound parent leg.
 
     Tracks call state transitions and marks sessions as ENDED when completed.
     """
@@ -516,6 +851,8 @@ async def twilio_media_stream_endpoint(websocket: WebSocket, session_id: str) ->
             elif event_type == "start":
                 start_data = msg_dict.get("start", {})
                 stream_sid = start_data.get("streamSid")
+                if session and stream_sid:
+                    session.stream_sid = stream_sid
                 logger.info(
                     "Twilio Media Stream started: streamSid=%s for session %s",
                     stream_sid,
