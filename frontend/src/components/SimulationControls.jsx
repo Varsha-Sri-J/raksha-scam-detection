@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { Play, Send, RefreshCw, Terminal, AlertCircle } from 'lucide-react'
+import { Send, RefreshCw, RotateCcw, Terminal } from 'lucide-react'
 
 export default function SimulationControls({
   onSimulate,
+  onResetSession,
   onSendTranscript,
   isSimulating = false,
   disabled = false,
@@ -47,6 +48,18 @@ export default function SimulationControls({
             className={isSimulating ? 'simulate-icon spinning' : 'simulate-icon'}
           />
           <span>{isSimulating ? 'Streaming Simulation...' : 'Simulate Scam Scenario'}</span>
+        </button>
+
+        {/* Reset Demo / New Session Button */}
+        <button
+          type="button"
+          className="btn-reset-session"
+          onClick={onResetSession}
+          disabled={isSimulating}
+          title="Start a fresh demo session with a new unique session ID"
+        >
+          <RotateCcw size={13} />
+          <span>New Session</span>
         </button>
 
         {/* Manual Utterance Injection Form */}

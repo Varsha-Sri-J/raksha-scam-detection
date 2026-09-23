@@ -1,8 +1,9 @@
 import React from 'react'
-import { ShieldCheck, Bell, MessageSquare, PhoneOff, MicOff, AlertCircle } from 'lucide-react'
+import { ShieldCheck, Bell, MessageSquare, PhoneOff, AlertCircle } from 'lucide-react'
 
-export default function ResponseStatus({ riskTier = 'SAFE', hasAlert = false }) {
+export default function ResponseStatus({ riskTier = 'SAFE', hasAlert = false, mode = 'STANDBY' }) {
   const isHighRisk = riskTier === 'HIGH' || riskTier === 'CRITICAL' || hasAlert
+  const capabilityTag = mode === 'SIMULATION' ? 'MOCK READY' : mode === 'LIVE_CALL' ? 'READY' : 'AVAILABLE'
 
   return (
     <div className="glass-panel response-status-panel">
@@ -49,46 +50,46 @@ export default function ResponseStatus({ riskTier = 'SAFE', hasAlert = false }) 
         </div>
       </div>
 
-      {/* Upcoming / Future Automated Interventions */}
+      {/* Automated Protection & Safeguard Capabilities */}
       <div className="future-actions-section">
         <div className="future-actions-header">
-          <AlertCircle size={13} color="var(--text-muted)" />
+          <AlertCircle size={13} color="var(--accent-cyan)" />
           <span>Automated Caregiver Interventions</span>
-          <span className="phase7-badge">Coming in Phase 7</span>
+          <span className="phase7-badge">{capabilityTag}</span>
         </div>
 
         <div className="future-actions-list">
-          <div className="future-action-item" title="Automated SMS to registered emergency family contacts (Phase 7)">
+          <div className="future-action-item" title="Automated SMS to registered emergency family contacts (Live Twilio SMS / Mock delivery)">
             <div className="future-action-icon">
               <MessageSquare size={14} />
             </div>
             <div className="future-action-info">
               <span className="future-action-title">Caregiver SMS Alert</span>
-              <span className="future-action-desc">Direct text dispatch with call transcript summary</span>
+              <span className="future-action-desc">Direct text dispatch with call transcript summary (Live Twilio / Mock)</span>
             </div>
-            <span className="phase-tag">Phase 7</span>
+            <span className="phase-tag">{capabilityTag}</span>
           </div>
 
-          <div className="future-action-item" title="Injected AI voice warning into protected callee's ear (Phase 7)">
+          <div className="future-action-item" title="Injected AI voice warning into protected callee stream (Live Twilio Conference / Mock guard)">
             <div className="future-action-icon">
               <Bell size={14} />
             </div>
             <div className="future-action-info">
               <span className="future-action-title">Audio Guard Whisper</span>
-              <span className="future-action-desc">Discreet audio advisory injected to protected listener</span>
+              <span className="future-action-desc">Discreet audio advisory injected to protected listener (Live Conference / Mock)</span>
             </div>
-            <span className="phase-tag">Phase 7</span>
+            <span className="phase-tag">{capabilityTag}</span>
           </div>
 
-          <div className="future-action-item" title="Emergency telephony disconnect via Twilio REST API (Phase 7)">
+          <div className="future-action-item" title="Emergency telephony disconnect via Twilio REST API on critical risk (Mock disconnect in simulation)">
             <div className="future-action-icon">
               <PhoneOff size={14} />
             </div>
             <div className="future-action-info">
               <span className="future-action-title">Emergency Call Terminate</span>
-              <span className="future-action-desc">Immediate carrier-level line severance</span>
+              <span className="future-action-desc">Immediate carrier-level line severance (Live Twilio / Mock)</span>
             </div>
-            <span className="phase-tag">Phase 7</span>
+            <span className="phase-tag">{capabilityTag}</span>
           </div>
         </div>
       </div>

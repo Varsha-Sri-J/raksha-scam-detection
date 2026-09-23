@@ -12,6 +12,15 @@ import ResponseStatus from './components/ResponseStatus'
 import SimulationControls from './components/SimulationControls'
 import { X } from 'lucide-react'
 
+function generateSessionId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `session-${crypto.randomUUID().slice(0, 8)}`
+  }
+  const rand = Math.random().toString(36).substring(2, 8)
+  const time = Date.now().toString(36).slice(-4)
+  return `session-${time}-${rand}`
+}
+
 export default function App() {
   const [sessionId, setSessionId] = useState('session-prototype-01')
   const [connectionStatus, setConnectionStatus] = useState('connecting')
@@ -41,6 +50,11 @@ export default function App() {
   const feedEndRef = useRef(null)
   const reconnectTimerRef = useRef(null)
   const processingTimerRef = useRef(null)
+  const sessionIdRef = useRef(sessionId)
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId
+  }, [sessionId])
 
   // Call Duration Timer
   useEffect(() => {
@@ -79,6 +93,15 @@ export default function App() {
       if (!isMounted) return
       setConnectionStatus('connecting')
 
+      // Ensure any existing socket is cleanly closed and detached
+      if (wsRef.current && wsRef.current.readyState < WebSocket.CLOSING) {
+        wsRef.current.onopen = null
+        wsRef.current.onclose = null
+        wsRef.current.onerror = null
+        wsRef.current.onmessage = null
+        wsRef.current.close()
+      }
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const wsUrl = `${protocol}//${window.location.host}/ws/call/${sessionId}`
 
@@ -86,25 +109,26 @@ export default function App() {
       wsRef.current = ws
 
       ws.onopen = () => {
-        if (!isMounted) return
+        if (!isMounted || wsRef.current !== ws) return
         setConnectionStatus('connected')
         setErrorNotification(null)
       }
 
       ws.onclose = () => {
-        if (!isMounted) return
+        if (!isMounted || wsRef.current !== ws) return
         setConnectionStatus('offline')
         // Auto-reconnect after 2 seconds
         reconnectTimerRef.current = setTimeout(connectWs, 2000)
       }
 
       ws.onerror = () => {
-        if (!isMounted) return
+        if (!isMounted || wsRef.current !== ws) return
         setConnectionStatus('offline')
         ws.close()
       }
 
       ws.onmessage = (event) => {
+        if (!isMounted || wsRef.current !== ws) return
         try {
           const msg = JSON.parse(event.data)
           if (!msg || !msg.type) return
@@ -233,15 +257,68 @@ export default function App() {
       isMounted = false
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
       }
       if (processingTimerRef.current) {
         clearTimeout(processingTimerRef.current)
+        processingTimerRef.current = null
       }
       if (wsRef.current) {
+        wsRef.current.onopen = null
+        wsRef.current.onclose = null
+        wsRef.current.onerror = null
+        wsRef.current.onmessage = null
         wsRef.current.close()
       }
     }
   }, [sessionId])
+
+  // Handle Reset Demo / Fresh Session
+  const handleResetSession = () => {
+    if (isSimulating) return
+
+    // Immediately tear down any active socket callbacks and connection
+    if (wsRef.current) {
+      wsRef.current.onopen = null
+      wsRef.current.onclose = null
+      wsRef.current.onerror = null
+      wsRef.current.onmessage = null
+      wsRef.current.close()
+      wsRef.current = null
+    }
+
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+    if (processingTimerRef.current) {
+      clearTimeout(processingTimerRef.current)
+      processingTimerRef.current = null
+    }
+
+    // Reset all UI states to clean baseline
+    setTranscripts([])
+    setRiskAssessment({
+      overall_score: 0.0,
+      risk_tier: 'SAFE',
+      explanation: 'Baseline safe state. Monitoring call stream.',
+      accumulated_tactics: [],
+    })
+    setActiveTactics({})
+    setRiskHistory([])
+    setActiveAlert(null)
+    setErrorNotification(null)
+    setSelectedTactic(null)
+    setLastSpeechTimestamp(null)
+    setIsProcessingSpeech(false)
+    setElapsedSeconds(0)
+    setIsSimulating(false)
+
+    // Generate new unique session ID
+    const newSessionId = generateSessionId()
+    sessionIdRef.current = newSessionId
+    setSessionId(newSessionId)
+  }
 
   // Handle Manual Transcript Injection
   const handleSendTranscript = ({ speaker, text }) => {
@@ -276,24 +353,32 @@ export default function App() {
 
   // Handle Mock Scam Simulation
   const handleSimulateScam = async () => {
-    if (isSimulating) return
+    if (isSimulating || connectionStatus !== 'connected') return
     setIsSimulating(true)
     setErrorNotification(null)
 
+    const targetSessionId = sessionId
+
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/simulate`, {
+      const res = await fetch(`/api/sessions/${targetSessionId}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ delay_seconds: 0.6 }),
       })
       if (!res.ok) {
         const data = await res.json()
-        setErrorNotification(data.detail || 'Simulation request failed')
+        if (sessionIdRef.current === targetSessionId) {
+          setErrorNotification(data.detail || 'Simulation request failed')
+        }
       }
     } catch (err) {
-      setErrorNotification('Could not connect to simulation API')
+      if (sessionIdRef.current === targetSessionId) {
+        setErrorNotification('Could not connect to simulation API')
+      }
     } finally {
-      setIsSimulating(false)
+      if (sessionIdRef.current === targetSessionId) {
+        setIsSimulating(false)
+      }
     }
   }
 
@@ -364,9 +449,10 @@ export default function App() {
             {/* Test & Simulation Controls */}
             <SimulationControls
               onSimulate={handleSimulateScam}
+              onResetSession={handleResetSession}
               onSendTranscript={handleSendTranscript}
               isSimulating={isSimulating}
-              disabled={connectionStatus === 'offline'}
+              disabled={connectionStatus !== 'connected'}
             />
           </section>
         </div>
@@ -385,6 +471,7 @@ export default function App() {
       <ResponseStatus
         riskTier={riskAssessment?.risk_tier || 'SAFE'}
         hasAlert={Boolean(activeAlert)}
+        mode={currentMode}
       />
 
       {/* 6. Dismissible Tactic Evidence Inspector Modal */}

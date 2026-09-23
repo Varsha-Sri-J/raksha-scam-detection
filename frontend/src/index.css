@@ -1065,6 +1065,34 @@ body {
   cursor: not-allowed;
 }
 
+.btn-reset-session {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  font-weight: 600;
+  font-size: 0.82rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-reset-session:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.2);
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.15);
+}
+
+.btn-reset-session:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .simulate-icon.spinning {
   animation: spin 1.5s linear infinite;
 }
@@ -1739,13 +1767,13 @@ body {
 
 .phase7-badge {
   font-size: 0.62rem;
-  background: rgba(148, 163, 184, 0.15);
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  color: var(--text-secondary);
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  color: var(--accent-cyan);
   padding: 1px 6px;
   border-radius: var(--radius-sm);
   font-weight: 700;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
   margin-left: auto;
 }
 
@@ -1757,21 +1785,21 @@ body {
 
 .future-action-item {
   background: rgba(0, 0, 0, 0.25);
-  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-md);
   padding: 8px 12px;
   display: flex;
   align-items: center;
   gap: 10px;
-  opacity: 0.85;
+  opacity: 0.95;
 }
 
 .future-action-icon {
-  color: var(--text-muted);
+  color: var(--accent-cyan);
   width: 24px;
   height: 24px;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 240, 255, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1799,8 +1827,11 @@ body {
 .phase-tag {
   font-size: 0.6rem;
   font-family: var(--font-mono);
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--accent-cyan);
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.2);
   padding: 1px 5px;
   border-radius: var(--radius-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
