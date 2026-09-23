@@ -114,6 +114,42 @@ class ProtectionDecision(BaseModel):
     timestamp: float = Field(default_factory=time.time)
 
 
+class CaregiverContact(BaseModel):
+    name: str
+    phone_number: str
+    enabled: bool = True
+
+
+class NotificationChannel(str, Enum):
+    SMS = "SMS"
+
+
+class NotificationStatus(str, Enum):
+    QUEUED = "QUEUED"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
+class NotificationRecord(BaseModel):
+    notification_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str
+    channel: NotificationChannel = NotificationChannel.SMS
+    recipient: str
+    message: str
+    status: NotificationStatus
+    provider: str = "mock"
+    timestamp: float = Field(default_factory=time.time)
+    error: Optional[str] = None
+
+
+class NotificationResult(BaseModel):
+    success: bool
+    message_id: Optional[str] = None
+    error: Optional[str] = None
+    provider: str = "mock"
+
+
 class CallSession(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     caller_id: Optional[str] = "Unknown"
@@ -124,6 +160,8 @@ class CallSession(BaseModel):
     transcript_history: List[TranscriptSegment] = Field(default_factory=list)
     latest_risk: Optional[RiskAssessment] = None
     protection_history: List[ProtectionDecision] = Field(default_factory=list)
+    caregiver_contacts: List[CaregiverContact] = Field(default_factory=list)
+    notification_history: List[NotificationRecord] = Field(default_factory=list)
 
 
 class WSMessageType(str, Enum):

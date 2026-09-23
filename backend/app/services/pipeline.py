@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.app.models import (
     CallSession,
+    NotificationRecord,
     ProtectionActionStatus,
     ProtectionActionType,
     ProtectionDecision,
@@ -17,6 +18,7 @@ from backend.app.models import (
     WSMessageType,
 )
 from backend.app.services.connection_manager import manager
+from backend.app.services.notification_service import caregiver_notification_service
 from backend.app.services.protection_engine import protection_engine
 from backend.app.services.session_store import session_store
 from backend.app.services.stt import (
@@ -109,7 +111,22 @@ class StreamingPipeline:
             )
             await session_store.add_protection_decision(session_id, protection_decision)
 
-        # 7. Construct structured events
+        # 7. Evaluate and dispatch caregiver notifications if eligible (Phase 7B)
+        notification_records: List[NotificationRecord] = []
+        if session and protection_decision:
+            try:
+                notification_records = caregiver_notification_service.dispatch_notifications(
+                    session=session,
+                    decision=protection_decision,
+                )
+                for record in notification_records:
+                    await session_store.add_notification_record(session_id, record)
+            except Exception as exc:
+                logger.exception(
+                    "Caregiver notification dispatch failed for session %s: %s", session_id, exc
+                )
+
+        # 8. Construct structured events
         events: List[WSMessage] = []
 
         # Event: TRANSCRIPT_UPDATE
@@ -196,6 +213,7 @@ class StreamingPipeline:
             "matches": matches,
             "risk": updated_risk,
             "protection": protection_decision,
+            "notifications": notification_records,
             "events": events,
         }
 

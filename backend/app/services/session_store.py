@@ -3,6 +3,7 @@ import time
 from typing import Dict, List, Optional
 from backend.app.models import (
     CallSession,
+    NotificationRecord,
     ProtectionDecision,
     RiskAssessment,
     SessionStatus,
@@ -92,6 +93,22 @@ class SessionStore:
                 session.protection_history = session.protection_history[-self.MAX_PROTECTION_HISTORY :]
             session.updated_at = time.time()
             return decision
+
+    MAX_NOTIFICATION_HISTORY: int = 100
+
+    async def add_notification_record(
+        self, session_id: str, record: NotificationRecord
+    ) -> Optional[NotificationRecord]:
+        """Append a notification record to the session history (bounded)."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.notification_history.append(record)
+            if len(session.notification_history) > self.MAX_NOTIFICATION_HISTORY:
+                session.notification_history = session.notification_history[-self.MAX_NOTIFICATION_HISTORY :]
+            session.updated_at = time.time()
+            return record
 
     async def end_session(self, session_id: str) -> Optional[CallSession]:
         """Mark a session as ENDED."""
