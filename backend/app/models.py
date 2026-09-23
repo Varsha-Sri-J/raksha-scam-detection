@@ -179,6 +179,37 @@ class UserWarningResult(BaseModel):
     provider: str = "mock"
 
 
+class InterventionType(str, Enum):
+    DISCONNECT = "DISCONNECT"
+
+
+class InterventionStatus(str, Enum):
+    REQUESTED = "REQUESTED"
+    EXECUTING = "EXECUTING"
+    EXECUTED = "EXECUTED"
+    FAILED = "FAILED"
+    SUPPRESSED = "SUPPRESSED"
+    SKIPPED = "SKIPPED"
+
+
+class InterventionRecord(BaseModel):
+    intervention_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str
+    type: InterventionType = InterventionType.DISCONNECT
+    status: InterventionStatus
+    provider: str = "mock"
+    reason: Optional[str] = None
+    timestamp: float = Field(default_factory=time.time)
+    error: Optional[str] = None
+
+
+class InterventionResult(BaseModel):
+    success: bool
+    intervention_id: Optional[str] = None
+    provider: str = "mock"
+    error: Optional[str] = None
+
+
 class CallSession(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     caller_id: Optional[str] = "Unknown"
@@ -192,6 +223,7 @@ class CallSession(BaseModel):
     caregiver_contacts: List[CaregiverContact] = Field(default_factory=list)
     notification_history: List[NotificationRecord] = Field(default_factory=list)
     user_warning_history: List[UserWarningRecord] = Field(default_factory=list)
+    intervention_history: List[InterventionRecord] = Field(default_factory=list)
 
 
 class WSMessageType(str, Enum):

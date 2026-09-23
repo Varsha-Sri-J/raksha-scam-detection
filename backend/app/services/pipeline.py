@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.app.models import (
     CallSession,
+    InterventionRecord,
     NotificationRecord,
     ProtectionActionStatus,
     ProtectionActionType,
@@ -19,6 +20,7 @@ from backend.app.models import (
     WSMessageType,
 )
 from backend.app.services.connection_manager import manager
+from backend.app.services.intervention_service import intervention_service
 from backend.app.services.notification_service import caregiver_notification_service
 from backend.app.services.protection_engine import protection_engine
 from backend.app.services.session_store import session_store
@@ -143,7 +145,23 @@ class StreamingPipeline:
                     "Protected user warning dispatch failed for session %s: %s", session_id, exc
                 )
 
-        # 9. Construct structured events
+        # 9. Evaluate and dispatch call intervention if eligible (Phase 7D-1)
+        intervention_record: Optional[InterventionRecord] = None
+        if session and protection_decision:
+            try:
+                intervention_record = await intervention_service.evaluate_and_execute(
+                    session=session,
+                    decision=protection_decision,
+                    risk=updated_risk,
+                )
+                if intervention_record:
+                    await session_store.add_intervention_record(session_id, intervention_record)
+            except Exception as exc:
+                logger.exception(
+                    "Call intervention dispatch failed for session %s: %s", session_id, exc
+                )
+
+        # 10. Construct structured events
         events: List[WSMessage] = []
 
         # Event: TRANSCRIPT_UPDATE
@@ -232,6 +250,7 @@ class StreamingPipeline:
             "protection": protection_decision,
             "notifications": notification_records,
             "user_warning": user_warning_record,
+            "intervention": intervention_record,
             "events": events,
         }
 

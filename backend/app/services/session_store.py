@@ -3,6 +3,7 @@ import time
 from typing import Dict, List, Optional
 from backend.app.models import (
     CallSession,
+    InterventionRecord,
     NotificationRecord,
     ProtectionDecision,
     RiskAssessment,
@@ -124,6 +125,22 @@ class SessionStore:
             session.user_warning_history.append(record)
             if len(session.user_warning_history) > self.MAX_USER_WARNING_HISTORY:
                 session.user_warning_history = session.user_warning_history[-self.MAX_USER_WARNING_HISTORY :]
+            session.updated_at = time.time()
+            return record
+
+    MAX_INTERVENTION_HISTORY: int = 100
+
+    async def add_intervention_record(
+        self, session_id: str, record: InterventionRecord
+    ) -> Optional[InterventionRecord]:
+        """Append an intervention record to the session history (bounded)."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.intervention_history.append(record)
+            if len(session.intervention_history) > self.MAX_INTERVENTION_HISTORY:
+                session.intervention_history = session.intervention_history[-self.MAX_INTERVENTION_HISTORY :]
             session.updated_at = time.time()
             return record
 
