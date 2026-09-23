@@ -150,6 +150,35 @@ class NotificationResult(BaseModel):
     provider: str = "mock"
 
 
+class UserWarningChannel(str, Enum):
+    VOICE = "VOICE"
+
+
+class UserWarningStatus(str, Enum):
+    QUEUED = "QUEUED"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
+class UserWarningRecord(BaseModel):
+    warning_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str
+    channel: UserWarningChannel = UserWarningChannel.VOICE
+    message: str
+    status: UserWarningStatus
+    provider: str = "mock"
+    timestamp: float = Field(default_factory=time.time)
+    error: Optional[str] = None
+
+
+class UserWarningResult(BaseModel):
+    success: bool
+    warning_id: Optional[str] = None
+    error: Optional[str] = None
+    provider: str = "mock"
+
+
 class CallSession(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     caller_id: Optional[str] = "Unknown"
@@ -162,6 +191,7 @@ class CallSession(BaseModel):
     protection_history: List[ProtectionDecision] = Field(default_factory=list)
     caregiver_contacts: List[CaregiverContact] = Field(default_factory=list)
     notification_history: List[NotificationRecord] = Field(default_factory=list)
+    user_warning_history: List[UserWarningRecord] = Field(default_factory=list)
 
 
 class WSMessageType(str, Enum):

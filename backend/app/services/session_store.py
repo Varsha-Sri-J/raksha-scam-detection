@@ -8,6 +8,7 @@ from backend.app.models import (
     RiskAssessment,
     SessionStatus,
     TranscriptSegment,
+    UserWarningRecord,
 )
 
 
@@ -107,6 +108,22 @@ class SessionStore:
             session.notification_history.append(record)
             if len(session.notification_history) > self.MAX_NOTIFICATION_HISTORY:
                 session.notification_history = session.notification_history[-self.MAX_NOTIFICATION_HISTORY :]
+            session.updated_at = time.time()
+            return record
+
+    MAX_USER_WARNING_HISTORY: int = 100
+
+    async def add_user_warning_record(
+        self, session_id: str, record: UserWarningRecord
+    ) -> Optional[UserWarningRecord]:
+        """Append a user warning record to the session history (bounded)."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.user_warning_history.append(record)
+            if len(session.user_warning_history) > self.MAX_USER_WARNING_HISTORY:
+                session.user_warning_history = session.user_warning_history[-self.MAX_USER_WARNING_HISTORY :]
             session.updated_at = time.time()
             return record
 

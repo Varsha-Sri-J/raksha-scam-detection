@@ -14,6 +14,7 @@ from backend.app.models import (
     SpeakerType,
     TacticMatch,
     TranscriptSegment,
+    UserWarningRecord,
     WSMessage,
     WSMessageType,
 )
@@ -21,6 +22,7 @@ from backend.app.services.connection_manager import manager
 from backend.app.services.notification_service import caregiver_notification_service
 from backend.app.services.protection_engine import protection_engine
 from backend.app.services.session_store import session_store
+from backend.app.services.user_warning_service import protected_user_warning_service
 from backend.app.services.stt import (
     BaseSTTProvider,
     MockSTTProvider,
@@ -126,7 +128,22 @@ class StreamingPipeline:
                     "Caregiver notification dispatch failed for session %s: %s", session_id, exc
                 )
 
-        # 8. Construct structured events
+        # 8. Evaluate and dispatch protected-user warning if eligible (Phase 7C)
+        user_warning_record: Optional[UserWarningRecord] = None
+        if session and protection_decision:
+            try:
+                user_warning_record = protected_user_warning_service.warn_user(
+                    session=session,
+                    decision=protection_decision,
+                )
+                if user_warning_record:
+                    await session_store.add_user_warning_record(session_id, user_warning_record)
+            except Exception as exc:
+                logger.exception(
+                    "Protected user warning dispatch failed for session %s: %s", session_id, exc
+                )
+
+        # 9. Construct structured events
         events: List[WSMessage] = []
 
         # Event: TRANSCRIPT_UPDATE
@@ -214,6 +231,7 @@ class StreamingPipeline:
             "risk": updated_risk,
             "protection": protection_decision,
             "notifications": notification_records,
+            "user_warning": user_warning_record,
             "events": events,
         }
 
