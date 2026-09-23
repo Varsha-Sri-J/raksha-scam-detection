@@ -3,6 +3,7 @@ import time
 from typing import Dict, List, Optional
 from backend.app.models import (
     CallSession,
+    ProtectionDecision,
     RiskAssessment,
     SessionStatus,
     TranscriptSegment,
@@ -64,6 +65,8 @@ class SessionStore:
             session.updated_at = time.time()
             return segment
 
+    MAX_PROTECTION_HISTORY: int = 100
+
     async def update_risk_assessment(
         self, session_id: str, assessment: RiskAssessment
     ) -> Optional[RiskAssessment]:
@@ -75,6 +78,20 @@ class SessionStore:
             session.latest_risk = assessment
             session.updated_at = time.time()
             return assessment
+
+    async def add_protection_decision(
+        self, session_id: str, decision: ProtectionDecision
+    ) -> Optional[ProtectionDecision]:
+        """Append a protection decision to the session history (bounded)."""
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return None
+            session.protection_history.append(decision)
+            if len(session.protection_history) > self.MAX_PROTECTION_HISTORY:
+                session.protection_history = session.protection_history[-self.MAX_PROTECTION_HISTORY :]
+            session.updated_at = time.time()
+            return decision
 
     async def end_session(self, session_id: str) -> Optional[CallSession]:
         """Mark a session as ENDED."""

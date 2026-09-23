@@ -73,6 +73,47 @@ class RiskAssessment(BaseModel):
     timestamp: float = Field(default_factory=time.time)
 
 
+class ProtectionLevel(str, Enum):
+    MONITORING = "MONITORING"
+    ADVISORY = "ADVISORY"
+    WARNING = "WARNING"
+    CRITICAL_INTERCEPT = "CRITICAL_INTERCEPT"
+
+
+class ProtectionActionType(str, Enum):
+    DASHBOARD_ALERT = "DASHBOARD_ALERT"
+    PROTECTED_USER_WHISPER = "PROTECTED_USER_WHISPER"
+    CAREGIVER_SMS = "CAREGIVER_SMS"
+    CALL_DISCONNECT = "CALL_DISCONNECT"
+
+
+class ProtectionActionStatus(str, Enum):
+    PENDING = "PENDING"
+    EXECUTED = "EXECUTED"
+    SUPPRESSED = "SUPPRESSED"
+
+
+class ProtectionAction(BaseModel):
+    action_type: ProtectionActionType
+    level: ProtectionLevel
+    recipient: Optional[str] = None
+    message: str
+    status: ProtectionActionStatus = ProtectionActionStatus.EXECUTED
+    timestamp: float = Field(default_factory=time.time)
+
+
+class ProtectionDecision(BaseModel):
+    session_id: str
+    level: ProtectionLevel
+    triggered_actions: List[ProtectionAction] = Field(default_factory=list)
+    trigger_score: float
+    trigger_tier: RiskTier
+    is_escalation: bool = False
+    cooldown_applied: bool = False
+    explanation: str
+    timestamp: float = Field(default_factory=time.time)
+
+
 class CallSession(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     caller_id: Optional[str] = "Unknown"
@@ -82,6 +123,7 @@ class CallSession(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     transcript_history: List[TranscriptSegment] = Field(default_factory=list)
     latest_risk: Optional[RiskAssessment] = None
+    protection_history: List[ProtectionDecision] = Field(default_factory=list)
 
 
 class WSMessageType(str, Enum):

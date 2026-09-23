@@ -5,6 +5,9 @@ from typing import Any, Dict, List, Optional
 
 from backend.app.models import (
     CallSession,
+    ProtectionActionStatus,
+    ProtectionActionType,
+    ProtectionDecision,
     RiskAssessment,
     RiskTier,
     SpeakerType,
@@ -14,6 +17,7 @@ from backend.app.models import (
     WSMessageType,
 )
 from backend.app.services.connection_manager import manager
+from backend.app.services.protection_engine import protection_engine
 from backend.app.services.session_store import session_store
 from backend.app.services.stt import (
     BaseSTTProvider,
@@ -95,7 +99,17 @@ class StreamingPipeline:
             await session_store.update_risk_assessment(session_id, updated_risk)
             session.latest_risk = updated_risk
 
-        # 6. Construct structured events
+        # 6. Evaluate protection policy downstream of risk engine
+        protection_decision: Optional[ProtectionDecision] = None
+        if updated_risk:
+            protection_decision = protection_engine.evaluate(
+                session_id=session_id,
+                risk_assessment=updated_risk,
+                segment=segment,
+            )
+            await session_store.add_protection_decision(session_id, protection_decision)
+
+        # 7. Construct structured events
         events: List[WSMessage] = []
 
         # Event: TRANSCRIPT_UPDATE
@@ -149,8 +163,12 @@ class StreamingPipeline:
             )
             events.append(risk_event)
 
-        # Event: ALERT_TRIGGERED (when risk tier reaches HIGH or CRITICAL)
-        if updated_risk and updated_risk.risk_tier in [RiskTier.HIGH, RiskTier.CRITICAL]:
+        # Event: ALERT_TRIGGERED (governed by ProtectionEngine decision)
+        if protection_decision and any(
+            a.action_type == ProtectionActionType.DASHBOARD_ALERT
+            and a.status == ProtectionActionStatus.EXECUTED
+            for a in protection_decision.triggered_actions
+        ):
             alert_event = WSMessage(
                 type=WSMessageType.ALERT_TRIGGERED,
                 data={
@@ -160,11 +178,15 @@ class StreamingPipeline:
                     "accumulated_tactics": [t.value for t in updated_risk.accumulated_tactics],
                     "explanation": updated_risk.explanation,
                     "latest_evidence": segment.text,
+                    # Backward-compatible Phase 7A protection metadata
+                    "protection_level": protection_decision.level.value,
+                    "is_escalation": protection_decision.is_escalation,
+                    "cooldown_applied": protection_decision.cooldown_applied,
                 },
             )
             events.append(alert_event)
 
-        # 7. Broadcast events to all active WebSocket listeners on this session
+        # 8. Broadcast events to all active WebSocket listeners on this session
         if broadcast:
             for event in events:
                 await manager.broadcast_session(session_id, event)
@@ -173,6 +195,7 @@ class StreamingPipeline:
             "segment": segment,
             "matches": matches,
             "risk": updated_risk,
+            "protection": protection_decision,
             "events": events,
         }
 
