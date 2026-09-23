@@ -65,6 +65,25 @@ class MockSTTProvider(BaseSTTProvider):
         delay_seconds: float = 0.0,
     ) -> AsyncIterator[TranscriptSegment]:
         """Yield TranscriptSegments one-by-one from the provided chunk list."""
+        # Explicit test bridge behavior: drain the incoming audio chunks from the async iterator,
+        # and yield deterministic simulated scam chunks for testing/simulation.
+        if hasattr(input_data, "__aiter__"):
+            chunk_idx = 0
+            async for _audio_chunk in input_data:
+                if delay_seconds > 0.0:
+                    await asyncio.sleep(delay_seconds)
+                if chunk_idx < len(self.DEFAULT_SCAM_CHUNKS):
+                    text = self.DEFAULT_SCAM_CHUNKS[chunk_idx]
+                    chunk_idx += 1
+                    yield TranscriptSegment(
+                        session_id=session_id,
+                        speaker=speaker,
+                        text=text.strip(),
+                        timestamp=time.time(),
+                        is_final=True,
+                    )
+            return
+
         chunks = input_data if input_data is not None else self.DEFAULT_SCAM_CHUNKS
 
         for text in chunks:

@@ -31,6 +31,7 @@ from backend.app.risk_engine import risk_engine
 from backend.app.services.connection_manager import manager
 from backend.app.services.pipeline import streaming_pipeline
 from backend.app.services.session_store import session_store
+from backend.app.services.stt import get_stt_provider
 from backend.app.services.twilio_service import twilio_service
 
 logging.basicConfig(
@@ -400,13 +401,13 @@ async def twilio_voice_status(
 async def twilio_media_stream_endpoint(websocket: WebSocket, session_id: str) -> None:
     """Twilio Media Stream WebSocket endpoint for receiving live call audio frames.
 
-    Phase 5A implements the connection lifecycle, event parsing, and payload decoding.
-    The audio bridge to Deepgram STT is deferred to Phase 5B.
+    Phase 5B connects incoming μ-law audio frames to the STT provider (Deepgram or Mock)
+    via a bounded async queue, and feeds resulting TranscriptSegments into the StreamingPipeline.
     """
     await websocket.accept()
     logger.info("Twilio Media Stream connected for session %s", session_id)
 
-    # Ensure session exists in session_store
+    # 1. Ensure session exists in session_store
     session = await session_store.get_session(session_id)
     if not session:
         session = await session_store.create_session(session_id=session_id)
@@ -414,12 +415,91 @@ async def twilio_media_stream_endpoint(websocket: WebSocket, session_id: str) ->
         await session_store.update_risk_assessment(session_id, baseline_risk)
         session.latest_risk = baseline_risk
 
+    # 2. Bounded audio queue (maxsize=500: ~10 seconds of 20ms frames)
+    audio_queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue(maxsize=500)
+    stt_failed = False
+    overflow_count = 0
+
+    # 3. Audio stream consumer generator
+    async def audio_stream_generator():
+        while True:
+            chunk = await audio_queue.get()
+            if chunk is None:  # EOF sentinel
+                break
+            yield chunk
+
+    # 4. STT bridge worker task
+    async def run_stt_worker():
+        nonlocal stt_failed
+        try:
+            stt_provider = get_stt_provider()
+            async for segment in stt_provider.stream_transcripts(
+                session_id=session_id,
+                input_data=audio_stream_generator(),
+                speaker=SpeakerType.CALLER,
+            ):
+                logger.info("STT segment received for session %s: %s", session_id, segment.text)
+                await streaming_pipeline.process_segment(segment, broadcast=True)
+        except asyncio.CancelledError:
+            logger.info("STT worker cancelled for session %s", session_id)
+            raise
+        except Exception as exc:
+            stt_failed = True
+            logger.exception("STT bridge failure for session %s: %s", session_id, exc)
+            # Drain queue to release buffered audio memory immediately
+            while not audio_queue.empty():
+                try:
+                    audio_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            await manager.broadcast_session(
+                session_id,
+                WSMessage(
+                    type=WSMessageType.ERROR,
+                    data={"session_id": session_id, "error": f"STT bridge error: {str(exc)}"},
+                ),
+            )
+
+    stt_task = asyncio.create_task(run_stt_worker())
+
+    async def shutdown_stt_worker(graceful: bool = True) -> None:
+        """Safely shut down the STT worker task without leaking tasks or raising CancelledError."""
+        if stt_task.done():
+            return
+
+        if graceful and not stt_failed:
+            # Signal EOF to audio generator
+            try:
+                audio_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                try:
+                    audio_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                audio_queue.put_nowait(None)
+
+            # Bounded grace period for STT provider & pipeline to finish processing
+            try:
+                await asyncio.wait([stt_task], timeout=2.0)
+            except (asyncio.CancelledError, Exception):
+                pass
+
+            if stt_task.done():
+                return
+
+        # If abrupt, ungraceful, or grace period exceeded, cancel STT worker safely
+        if not stt_task.done():
+            stt_task.cancel()
+            try:
+                await asyncio.shield(stt_task)
+            except (asyncio.CancelledError, Exception):
+                pass
+
     try:
         while True:
             raw_data = await websocket.receive_text()
             event_type, msg_dict = twilio_service.parse_media_stream_message(raw_data)
-
-            if event_type is None:
+            if event_type is None or msg_dict is None:
                 logger.warning(
                     "Received malformed Twilio media stream message on session %s",
                     session_id,
@@ -427,37 +507,72 @@ async def twilio_media_stream_endpoint(websocket: WebSocket, session_id: str) ->
                 continue
 
             if event_type == "connected":
-                logger.info("Twilio media stream connected for session %s", session_id)
+                logger.info(
+                    "Twilio Media Stream protocol %s connected for session %s",
+                    msg_dict.get("protocol"),
+                    session_id,
+                )
 
             elif event_type == "start":
                 start_data = msg_dict.get("start", {})
                 stream_sid = start_data.get("streamSid")
                 logger.info(
-                    "Twilio media stream started: streamSid=%s for session %s",
+                    "Twilio Media Stream started: streamSid=%s for session %s",
                     stream_sid,
                     session_id,
                 )
 
             elif event_type == "media":
+                logger.debug("Received media frame on session %s", session_id)
+                # If STT worker has failed permanently, do not queue new audio
+                if stt_failed:
+                    continue
+
                 media_data = msg_dict.get("media", {})
+                track = media_data.get("track", "inbound")
+
+                # Currently supported: inbound caller track
+                if track != "inbound":
+                    logger.debug("Ignoring unsupported track '%s' on session %s", track, session_id)
+                    continue
+
                 payload_b64 = media_data.get("payload", "")
                 audio_bytes = twilio_service.decode_media_payload(payload_b64)
                 if audio_bytes is None:
                     logger.warning(
                         "Received invalid base64 media payload on session %s", session_id
                     )
-                # Phase 5A: Audio validation complete. Deepgram bridge deferred to Phase 5B.
+                    continue
+
+                # Bounded queue push with explicit overflow handling
+                try:
+                    audio_queue.put_nowait(audio_bytes)
+                except asyncio.QueueFull:
+                    overflow_count += 1
+                    if overflow_count == 1 or overflow_count % 50 == 0:
+                        logger.warning(
+                            "Twilio audio queue full for session %s. Dropped %d frame(s).",
+                            session_id,
+                            overflow_count,
+                        )
 
             elif event_type == "stop":
-                logger.info("Twilio media stream stopped for session %s", session_id)
+                logger.info("Twilio media stream stop received for session %s", session_id)
+                await shutdown_stt_worker(graceful=True)
                 break
 
     except WebSocketDisconnect:
-        logger.info("Twilio Media Stream disconnected for session %s", session_id)
+        logger.info("Twilio Media Stream client disconnected for session %s", session_id)
+    except asyncio.CancelledError:
+        logger.info("Twilio Media Stream session cancelled for session %s", session_id)
     except Exception as exc:
-        logger.exception(
+        logger.warning(
             "Unexpected error in Twilio Media Stream for session %s: %s",
             session_id,
             exc,
         )
-
+    finally:
+        try:
+            await shutdown_stt_worker(graceful=False)
+        except (asyncio.CancelledError, Exception):
+            pass
