@@ -138,7 +138,8 @@ class SessionStore:
             session = self._sessions.get(session_id)
             if not session:
                 return None
-            session.intervention_history.append(record)
+            if not any(r.intervention_id == record.intervention_id for r in session.intervention_history):
+                session.intervention_history.append(record)
             if len(session.intervention_history) > self.MAX_INTERVENTION_HISTORY:
                 session.intervention_history = session.intervention_history[-self.MAX_INTERVENTION_HISTORY :]
             session.updated_at = time.time()

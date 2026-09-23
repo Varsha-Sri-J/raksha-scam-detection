@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     TWILIO_PHONE_NUMBER: Optional[str] = None
     TWILIO_STREAM_BASE_URL: Optional[str] = None
     TWILIO_VALIDATE_SIGNATURE: bool = False
+    TWILIO_API_TIMEOUT_SECONDS: float = 3.0
+
+    # Intervention Provider Configuration (Phase 7D-2)
+    INTERVENTION_PROVIDER: str = "mock"  # "mock" or "twilio"
 
     model_config = SettingsConfigDict(
         env_file=".env",
