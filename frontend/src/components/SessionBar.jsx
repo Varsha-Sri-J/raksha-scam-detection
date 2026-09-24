@@ -4,8 +4,8 @@ import { Phone, User, Clock, ShieldCheck, Key } from 'lucide-react'
 export default function SessionBar({
   sessionId,
   callStatus = 'ACTIVE',
-  calleeName = 'Margaret H.',
-  callerNumber = '+1 (800) 555-0199',
+  calleeName = 'Lakshmi R.',
+  callerNumber = '+91 98765 43210',
   elapsedSeconds = 0,
   mode = 'STANDBY',
 }) {

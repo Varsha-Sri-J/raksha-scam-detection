@@ -1,9 +1,37 @@
 import React from 'react'
 import { ShieldCheck, Bell, MessageSquare, PhoneOff, AlertCircle } from 'lucide-react'
 
-export default function ResponseStatus({ riskTier = 'SAFE', hasAlert = false, mode = 'STANDBY' }) {
+export default function ResponseStatus({
+  riskTier = 'SAFE',
+  hasAlert = false,
+  mode = 'STANDBY',
+  caregiverRecord = null,
+  userWarningRecord = null,
+  interventionRecord = null,
+}) {
   const isHighRisk = riskTier === 'HIGH' || riskTier === 'CRITICAL' || hasAlert
   const capabilityTag = mode === 'SIMULATION' ? 'MOCK READY' : mode === 'LIVE_CALL' ? 'READY' : 'AVAILABLE'
+
+  const getStatusBadge = (record, defaultTag) => {
+    if (!record) {
+      return { tag: defaultTag, className: 'phase-tag' }
+    }
+    const status = record.status || 'UNKNOWN'
+    const provider = record.provider ? ` · ${record.provider.toUpperCase()}` : ''
+    let statusClass = 'phase-tag'
+    if (status === 'SENT' || status === 'DELIVERED' || status === 'EXECUTED') {
+      statusClass = 'phase-tag tag-executed'
+    } else if (status === 'FAILED') {
+      statusClass = 'phase-tag tag-failed'
+    } else if (status === 'SKIPPED' || status === 'SUPPRESSED') {
+      statusClass = 'phase-tag tag-skipped'
+    }
+    return { tag: `${status}${provider}`, className: statusClass }
+  }
+
+  const caregiverBadge = getStatusBadge(caregiverRecord, capabilityTag)
+  const warningBadge = getStatusBadge(userWarningRecord, capabilityTag)
+  const interventionBadge = getStatusBadge(interventionRecord, capabilityTag)
 
   return (
     <div className="glass-panel response-status-panel">
@@ -65,9 +93,13 @@ export default function ResponseStatus({ riskTier = 'SAFE', hasAlert = false, mo
             </div>
             <div className="future-action-info">
               <span className="future-action-title">Caregiver SMS Alert</span>
-              <span className="future-action-desc">Direct text dispatch with call transcript summary (Live Twilio / Mock)</span>
+              <span className="future-action-desc">
+                {caregiverRecord
+                  ? `To: ${caregiverRecord.recipient} · ${caregiverRecord.status === 'SENT' ? 'Alert message delivered' : caregiverRecord.error || caregiverRecord.status}`
+                  : 'Direct text dispatch with call transcript summary (Live Twilio / Mock)'}
+              </span>
             </div>
-            <span className="phase-tag">{capabilityTag}</span>
+            <span className={caregiverBadge.className}>{caregiverBadge.tag}</span>
           </div>
 
           <div className="future-action-item" title="Injected AI voice warning into protected callee stream (Live Twilio Conference / Mock guard)">
@@ -76,9 +108,13 @@ export default function ResponseStatus({ riskTier = 'SAFE', hasAlert = false, mo
             </div>
             <div className="future-action-info">
               <span className="future-action-title">Audio Guard Whisper</span>
-              <span className="future-action-desc">Discreet audio advisory injected to protected listener (Live Conference / Mock)</span>
+              <span className="future-action-desc">
+                {userWarningRecord
+                  ? `Channel: ${userWarningRecord.channel} · ${userWarningRecord.status === 'DELIVERED' ? 'Audio advisory injected' : userWarningRecord.error || userWarningRecord.status}`
+                  : 'Discreet audio advisory injected to protected listener (Live Conference / Mock)'}
+              </span>
             </div>
-            <span className="phase-tag">{capabilityTag}</span>
+            <span className={warningBadge.className}>{warningBadge.tag}</span>
           </div>
 
           <div className="future-action-item" title="Emergency telephony disconnect via Twilio REST API on critical risk (Mock disconnect in simulation)">
@@ -87,9 +123,13 @@ export default function ResponseStatus({ riskTier = 'SAFE', hasAlert = false, mo
             </div>
             <div className="future-action-info">
               <span className="future-action-title">Emergency Call Terminate</span>
-              <span className="future-action-desc">Immediate carrier-level line severance (Live Twilio / Mock)</span>
+              <span className="future-action-desc">
+                {interventionRecord
+                  ? `Action: ${interventionRecord.type} · ${interventionRecord.status === 'EXECUTED' ? (interventionRecord.reason || 'Call terminated') : interventionRecord.error || interventionRecord.status}`
+                  : 'Immediate carrier-level line severance (Live Twilio / Mock)'}
+              </span>
             </div>
-            <span className="phase-tag">{capabilityTag}</span>
+            <span className={interventionBadge.className}>{interventionBadge.tag}</span>
           </div>
         </div>
       </div>

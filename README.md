@@ -233,7 +233,7 @@ For hackathons, evaluations, and local demonstrations, RAKSHA provides a **Mock 
 - **100% Offline & Reliable**: Runs entirely on `localhost`. Requires zero API keys, no internet connection, and no Twilio balance.
 - **Zero Real Telephony Side-Effects**: Does not dial real phones, does not send carrier SMS, and does not disconnect external calls.
 - **Identical Pipeline Execution**: Transcripts flow through the exact same `StreamingPipeline`, `SemanticClassifier`, `RiskEngine`, and `ProtectionEngine` used in live mode.
-- **Interactive Scenarios**: Includes a pre-configured 5-step IRS imposter scam scenario, manual utterance injection, and instant session resets.
+- **Interactive Scenarios**: Includes a pre-configured 5-step Cyber Crime police imposter scam scenario, live browser microphone demonstration mode, manual utterance injection, and instant session resets.
 
 ---
 
@@ -247,7 +247,7 @@ The frontend (`frontend/src/`) is a glassmorphic cybersecurity operations dashbo
 - **Tactic Evidence Inspector**: Clickable forensic modal displaying the exact extracted quote and similarity metrics.
 - **Chronological Risk Timeline**: Historical graph showing risk score progression turn-by-turn.
 - **Active Defense & Response Status**: Real-time operational status of Semantic Analysis, Threat Engine, Caregiver SMS, Audio Whisper, and Line Severance capabilities.
-- **Simulation Suite**: Includes "Simulate Scam Scenario" button, dual-speaker manual utterance injection, and a clean "New Session" reset button.
+- **Simulation & Demo Suite**: Includes "Simulate Scam Scenario" button (5-turn Indian scam scenario), "Start Browser Mic Demo" (Web Speech API adapter for live speech testing), dual-speaker manual utterance injection, and a clean "New Session" reset button.
 - **Visual Waveform**: Live streaming activity visualizer indicating conversational audio presence.
 
 ---
@@ -349,29 +349,42 @@ Visit `http://localhost:5173` to open the RAKSHA Operations Dashboard.
 
 ---
 
-## 13. Step-by-Step Offline Demo Procedure
+## 13. Step-by-Step Demo Procedure
 
 Follow this procedure for a 3-minute hackathon demonstration:
 
 1. **Start System**: Ensure backend and frontend are running. Open `http://localhost:5173`.
-2. **Observe SAFE Baseline**: Verify Threat Gauge shows `0.0 SAFE`, all tactics are gray, and protection indicates `AVAILABLE`.
+2. **Observe SAFE Baseline**: Verify callee is set to **`Lakshmi R.` (+91 98765 43210)**, Threat Gauge shows `0.0 SAFE`, all tactics are gray, and protection indicates `AVAILABLE`.
 3. **Inject Benign Utterance (Optional)**:
-   - In the manual injection box, type: `"Hi Grandma, I'll be over around 5pm for dinner."`
+   - In the manual injection box, type: `"Namaste Aunty, I'll visit this evening after work."`
    - Click **Inject**. Observe that score remains `0.0 SAFE` with zero tactics triggered.
 4. **Trigger Scam Simulation**:
    - Click **Simulate Scam Scenario**.
-   - Watch the 5-turn IRS scam scenario stream automatically into the transcript feed:
-     - *Turn 1 (Authority)*: Officer Davis IRS impersonation detected. Score rises to `LOW`.
-     - *Turn 2 (Panic & Urgency)*: Immediate arrest threat. Score escalates.
-     - *Turn 3 (Isolation)*: Order not to tell family. Risk crosses threshold into `WARNING`.
-     - *Turn 4 (Financial)*: CVS Target gift card payment demanded. Priority Alert modal appears.
-     - *Turn 5 (Extraction)*: PIN requested. Score reaches `CRITICAL`, triggering simulated carrier disconnect.
-5. **Inspect Forensic Evidence**:
+   - Watch the 5-turn Indian Cyber Crime scam scenario stream automatically into the transcript feed:
+     - *Turn 1 (Authority)*: Officer Sharma Cyber Crime Department impersonation detected. Score rises to `SAFE` (~19.3).
+     - *Turn 2 (Fear & Intimidation)*: Arrest warrant and bank account freeze. Score escalates to `LOW` (~47.1).
+     - *Turn 3 (Urgency & Isolation)*: 15-minute deadline before officers arrive. Score reaches `CRITICAL` (100.0), triggering Priority Intervention Alert modal.
+     - *Turn 4 (Secrecy)*: Order not to disconnect or tell family. Risk remains `CRITICAL` (100.0) with cooldown protection.
+     - *Turn 5 (Credential Phishing)*: 6-digit OTP verification code demanded. Phishing escalation confirmed.
+5. **Live Browser Microphone Demo (Optional)**:
+   - Click **🎙 Start Browser Mic Demo** (requires Chrome, Edge, or Safari).
+   - Grant microphone permission when prompted.
+   - Speak into your microphone: *"This is Officer Sharma from the Cyber Crime Department."*
+   - Observe live interim feedback, followed by the finalized transcript routing through the existing WebSocket pipeline.
+   - Watch `AUTHORITY_IMPERSONATION` light up dynamically in the Manipulation Taxonomy Matrix.
+   - Click **⏹ Stop Browser Mic Demo**.
+6. **Inspect Forensic Evidence**:
    - Click any highlighted card in the Manipulation Taxonomy Matrix (e.g., *Authority Impersonation*).
    - View confidence score, timestamp, and exact extracted phrase in the Evidence Inspector modal.
-6. **Reset Session**:
+7. **Reset Session**:
    - Click **New Session** in the simulation controls bar.
-   - Observe that a new unique session ID is generated, the WebSocket cleanly reconnects, and all metrics return to baseline.
+   - Observe that any active microphone recording stops cleanly, a new unique session ID is generated, the WebSocket cleanly reconnects, and all metrics return to baseline.
+
+> [!NOTE]
+> **Operational Mode Architecture**:
+> - **Simulation Mode**: Deterministic predefined 5-turn Indian scam scenario streamed through local mock STT.
+> - **Browser Mic Demo**: Browser Web Speech API (`SpeechRecognition`) adapter transcribing local user speech into transcript utterances, which enter the exact same RAKSHA detection/risk/protection pipeline over WebSocket. (Does not use Deepgram or carrier PSTN).
+> - **Live Telephony Mode**: Production telephony integration boundary connecting Twilio Media Streams (µ-law audio) to Deepgram Nova-2 streaming STT and carrier REST APIs for whisper advisory and scammer leg disconnect.
 
 ---
 

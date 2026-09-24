@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from backend.app.config import settings
 from backend.app.models import (
     CallSession,
+    CaregiverContact,
     RiskAssessment,
     SessionStatus,
     SpeakerType,
@@ -62,6 +63,7 @@ class CreateSessionRequest(BaseModel):
     caller_id: Optional[str] = "Unknown"
     callee_id: Optional[str] = "Protected Callee"
     session_id: Optional[str] = None
+    caregiver_contacts: Optional[List[CaregiverContact]] = None
 
 
 class AddSegmentRequest(BaseModel):
@@ -74,6 +76,9 @@ class SimulateSessionRequest(BaseModel):
     chunks: Optional[List[str]] = None
     speaker: SpeakerType = SpeakerType.CALLER
     delay_seconds: float = 0.0
+    callee_id: Optional[str] = None
+    caller_id: Optional[str] = None
+    caregiver_contacts: Optional[List[CaregiverContact]] = None
 
 
 # --- REST Endpoints ---
@@ -98,6 +103,7 @@ async def create_session(payload: CreateSessionRequest) -> CallSession:
         session_id=payload.session_id,
         caller_id=payload.caller_id,
         callee_id=payload.callee_id,
+        caregiver_contacts=payload.caregiver_contacts,
     )
     # Initialize baseline risk assessment
     baseline_risk = risk_engine.evaluate_session(session)
@@ -141,6 +147,34 @@ async def add_segment(session_id: str, payload: AddSegmentRequest) -> Transcript
 @app.post("/api/sessions/{session_id}/simulate", tags=["Simulation"])
 async def simulate_session(session_id: str, payload: SimulateSessionRequest) -> Dict[str, Any]:
     """Run a mock streaming STT simulation through the RAKSHA pipeline."""
+    session = await session_store.get_session(session_id)
+    callee = payload.callee_id if payload.callee_id is not None else (session.callee_id if session else "Protected Callee")
+    caregivers = payload.caregiver_contacts
+    if caregivers is None and (callee == "Lakshmi R." or (session and session.callee_id == "Lakshmi R.")):
+        caregivers = [
+            CaregiverContact(
+                name="Ananya R.",
+                phone_number="+91 91234 56789",
+                relationship="Daughter",
+                enabled=True,
+            )
+        ]
+
+    if not session:
+        session = await session_store.create_session(
+            session_id=session_id,
+            caller_id=payload.caller_id if payload.caller_id is not None else "Unknown",
+            callee_id=callee,
+            caregiver_contacts=caregivers,
+        )
+    else:
+        if payload.callee_id is not None:
+            session.callee_id = payload.callee_id
+        if payload.caller_id is not None:
+            session.caller_id = payload.caller_id
+        if caregivers is not None:
+            session.caregiver_contacts = caregivers
+
     results = await streaming_pipeline.run_simulation(
         session_id=session_id,
         chunks=payload.chunks,

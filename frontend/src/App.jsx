@@ -41,6 +41,11 @@ export default function App() {
   const [activeAlert, setActiveAlert] = useState(null)
   const [errorNotification, setErrorNotification] = useState(null)
 
+  // Protection Execution States (Phase 10C)
+  const [latestCaregiver, setLatestCaregiver] = useState(null)
+  const [latestUserWarning, setLatestUserWarning] = useState(null)
+  const [latestIntervention, setLatestIntervention] = useState(null)
+
   // UI Micro-States
   const [lastSpeechTimestamp, setLastSpeechTimestamp] = useState(null)
   const [isProcessingSpeech, setIsProcessingSpeech] = useState(false)
@@ -133,6 +138,14 @@ export default function App() {
           const msg = JSON.parse(event.data)
           if (!msg || !msg.type) return
 
+          // Guard against stale cross-session message leakage
+          if (msg.data?.session_id && msg.data.session_id !== sessionIdRef.current) {
+            return
+          }
+          if (msg.data?.session?.session_id && msg.data.session.session_id !== sessionIdRef.current) {
+            return
+          }
+
           // 1. SESSION_STATUS
           if (msg.type === 'SESSION_STATUS' && msg.data?.session) {
             const sess = msg.data.session
@@ -158,6 +171,37 @@ export default function App() {
                   },
                 ])
               }
+            }
+
+            // Phase 10C: Hydrate protection state from SESSION_STATUS history defensively
+            const validNotifs = (sess.notification_history || []).filter(
+              (n) => n && n.notification_id
+            )
+            if (validNotifs.length > 0) {
+              const sorted = [...validNotifs].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+              setLatestCaregiver(sorted[0] || null)
+            } else {
+              setLatestCaregiver(null)
+            }
+
+            const validWarnings = (sess.user_warning_history || []).filter(
+              (w) => w && w.warning_id
+            )
+            if (validWarnings.length > 0) {
+              const sorted = [...validWarnings].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+              setLatestUserWarning(sorted[0] || null)
+            } else {
+              setLatestUserWarning(null)
+            }
+
+            const validInterventions = (sess.intervention_history || []).filter(
+              (i) => i && i.intervention_id
+            )
+            if (validInterventions.length > 0) {
+              const sorted = [...validInterventions].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+              setLatestIntervention(sorted[0] || null)
+            } else {
+              setLatestIntervention(null)
             }
           }
 
@@ -239,6 +283,23 @@ export default function App() {
           // 5. ALERT_TRIGGERED
           else if (msg.type === 'ALERT_TRIGGERED' && msg.data) {
             setActiveAlert(msg.data)
+
+            // Phase 10C: Ingest downstream protection execution records defensively
+            if (Array.isArray(msg.data.caregiver_notifications)) {
+              const validNotifs = msg.data.caregiver_notifications.filter(
+                (n) => n && n.notification_id
+              )
+              if (validNotifs.length > 0) {
+                const latest = [...validNotifs].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))[0]
+                setLatestCaregiver(latest)
+              }
+            }
+            if (msg.data.user_warning && msg.data.user_warning.warning_id) {
+              setLatestUserWarning(msg.data.user_warning)
+            }
+            if (msg.data.intervention && msg.data.intervention.intervention_id) {
+              setLatestIntervention(msg.data.intervention)
+            }
           }
 
           // 6. ERROR
@@ -307,6 +368,9 @@ export default function App() {
     setActiveTactics({})
     setRiskHistory([])
     setActiveAlert(null)
+    setLatestCaregiver(null)
+    setLatestUserWarning(null)
+    setLatestIntervention(null)
     setErrorNotification(null)
     setSelectedTactic(null)
     setLastSpeechTimestamp(null)
@@ -351,6 +415,15 @@ export default function App() {
     }
   }
 
+  // Fictional Indian 5-turn scam scenario for simulation
+  const INDIAN_SCAM_CHUNKS = [
+    'This is Officer Sharma from the Cyber Crime Department.',
+    'An arrest warrant and account freeze have been issued against your bank account for money laundering.',
+    'You must resolve this urgent matter within fifteen minutes before police officers arrive at your residence.',
+    'Do not disconnect this line and do not tell your family or anyone about this investigation.',
+    'Read me the six digit OTP verification code that was just sent to your mobile phone.',
+  ]
+
   // Handle Mock Scam Simulation
   const handleSimulateScam = async () => {
     if (isSimulating || connectionStatus !== 'connected') return
@@ -363,7 +436,19 @@ export default function App() {
       const res = await fetch(`/api/sessions/${targetSessionId}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ delay_seconds: 0.6 }),
+        body: JSON.stringify({
+          chunks: INDIAN_SCAM_CHUNKS,
+          delay_seconds: 0.6,
+          callee_id: 'Lakshmi R.',
+          caregiver_contacts: [
+            {
+              name: 'Ananya R.',
+              phone_number: '+91 91234 56789',
+              relationship: 'Daughter',
+              enabled: true,
+            },
+          ],
+        }),
       })
       if (!res.ok) {
         const data = await res.json()
@@ -391,8 +476,8 @@ export default function App() {
       <SessionBar
         sessionId={sessionId}
         callStatus="ACTIVE"
-        calleeName="Margaret H."
-        callerNumber="+1 (800) 555-0199"
+        calleeName="Lakshmi R."
+        callerNumber="+91 98765 43210"
         elapsedSeconds={elapsedSeconds}
         mode={currentMode}
       />
@@ -448,6 +533,7 @@ export default function App() {
 
             {/* Test & Simulation Controls */}
             <SimulationControls
+              sessionId={sessionId}
               onSimulate={handleSimulateScam}
               onResetSession={handleResetSession}
               onSendTranscript={handleSendTranscript}
@@ -472,6 +558,9 @@ export default function App() {
         riskTier={riskAssessment?.risk_tier || 'SAFE'}
         hasAlert={Boolean(activeAlert)}
         mode={currentMode}
+        caregiverRecord={latestCaregiver}
+        userWarningRecord={latestUserWarning}
+        interventionRecord={latestIntervention}
       />
 
       {/* 6. Dismissible Tactic Evidence Inspector Modal */}

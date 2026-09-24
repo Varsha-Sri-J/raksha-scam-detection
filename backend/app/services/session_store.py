@@ -3,6 +3,7 @@ import time
 from typing import Dict, List, Optional
 from backend.app.models import (
     CallSession,
+    CaregiverContact,
     InterventionRecord,
     NotificationRecord,
     ProtectionDecision,
@@ -26,6 +27,7 @@ class SessionStore:
         session_id: Optional[str] = None,
         caller_id: Optional[str] = "Unknown",
         callee_id: Optional[str] = "Protected Callee",
+        caregiver_contacts: Optional[List[CaregiverContact]] = None,
     ) -> CallSession:
         """Create and store a new CallSession."""
         async with self._lock:
@@ -38,6 +40,7 @@ class SessionStore:
                 updated_at=now,
                 transcript_history=[],
                 latest_risk=None,
+                caregiver_contacts=caregiver_contacts or [],
             )
             if session_id:
                 session.session_id = session_id

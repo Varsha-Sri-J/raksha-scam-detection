@@ -239,6 +239,10 @@ class StreamingPipeline:
                     "protection_level": protection_decision.level.value,
                     "is_escalation": protection_decision.is_escalation,
                     "cooldown_applied": protection_decision.cooldown_applied,
+                    # Phase 10C: Enriched downstream protection execution records
+                    "caregiver_notifications": [r.model_dump() for r in notification_records],
+                    "user_warning": user_warning_record.model_dump() if user_warning_record else None,
+                    "intervention": intervention_record.model_dump() if intervention_record else None,
                 },
             )
             events.append(alert_event)

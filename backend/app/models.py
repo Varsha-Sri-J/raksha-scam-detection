@@ -117,6 +117,7 @@ class ProtectionDecision(BaseModel):
 class CaregiverContact(BaseModel):
     name: str
     phone_number: str
+    relationship: Optional[str] = None
     enabled: bool = True
 
 
