@@ -49,6 +49,8 @@ class TranscriptSegment(BaseModel):
     text: str
     timestamp: float = Field(default_factory=time.time)
     is_final: bool = True
+    detected_language: Optional[str] = None
+    detected_languages: List[str] = Field(default_factory=list)
 
 
 class TacticMatch(BaseModel):

@@ -182,12 +182,28 @@ class DeepgramSTTProvider(BaseSTTProvider):
         is_final = bool(response_json.get("is_final", False))
         start_time = float(response_json.get("start", time.time()))
 
+        detected_lang = (
+            response_json.get("detected_language")
+            or channel_data.get("detected_language")
+            or primary_alt.get("language")
+        )
+        detected_langs = (
+            primary_alt.get("languages", [])
+            or response_json.get("detected_languages", [])
+        )
+        if detected_lang and not detected_langs:
+            detected_langs = [detected_lang]
+        elif detected_langs and not detected_lang:
+            detected_lang = detected_langs[0]
+
         return TranscriptSegment(
             session_id=session_id,
             speaker=speaker,
             text=transcript_text,
             timestamp=start_time if start_time > 0 else time.time(),
             is_final=is_final,
+            detected_language=detected_lang,
+            detected_languages=detected_langs,
         )
 
     async def stream_transcripts(
@@ -262,26 +278,202 @@ class DeepgramSTTProvider(BaseSTTProvider):
             ) from exc
 
 
+class SarvamSTTProvider(BaseSTTProvider):
+    """Sarvam AI Real-Time Multilingual Speech-to-Text Provider.
+
+    Connects to Sarvam's live streaming WebSocket API (`wss://api.sarvam.ai/speech-to-text-realtime/ws`)
+    to perform real-time multilingual and code-mixed transcription (Hindi, Kannada, Telugu, Tamil,
+    Malayalam, Marathi, Bengali, Gujarati, Punjabi, Odia, English).
+
+    Security:
+      - Never logs or exposes the raw API key.
+      - Uses settings.SARVAM_API_KEY by default.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        language_code: Optional[str] = None,
+        sample_rate: Optional[int] = None,
+        encoding: Optional[str] = None,
+    ) -> None:
+        self.api_key = api_key or settings.SARVAM_API_KEY
+        self.model = model or settings.SARVAM_STT_MODEL
+        self.language_code = language_code or settings.SARVAM_LANGUAGE_CODE
+        self.sample_rate = sample_rate or settings.SARVAM_SAMPLE_RATE
+        self.encoding = encoding or settings.SARVAM_ENCODING
+
+    def __repr__(self) -> str:
+        masked_key = "***" if self.api_key else "None"
+        return (
+            f"SarvamSTTProvider(model='{self.model}', language_code='{self.language_code}', "
+            f"sample_rate={self.sample_rate}, encoding='{self.encoding}', api_key={masked_key})"
+        )
+
+    def build_websocket_url(self) -> str:
+        """Construct the authenticated Sarvam real-time STT WebSocket URL with query parameters."""
+        return (
+            f"wss://api.sarvam.ai/speech-to-text-realtime/ws?"
+            f"model={self.model}&"
+            f"language_code={self.language_code}&"
+            f"sample_rate={self.sample_rate}&"
+            f"encoding={self.encoding}"
+        )
+
+    @staticmethod
+    def parse_sarvam_response(
+        response_json: Dict[str, Any],
+        session_id: str,
+        speaker: SpeakerType = SpeakerType.CALLER,
+    ) -> Optional[TranscriptSegment]:
+        """Convert a Sarvam streaming JSON response into a TranscriptSegment.
+
+        Returns None if the response contains no transcript words or text.
+        """
+        if not isinstance(response_json, dict):
+            return None
+
+        # Extract transcript text from Sarvam payload
+        transcript_text = (
+            response_json.get("transcript")
+            or response_json.get("text")
+            or response_json.get("data", {}).get("transcript")
+            or ""
+        )
+        if isinstance(transcript_text, str):
+            transcript_text = transcript_text.strip()
+        else:
+            transcript_text = ""
+
+        if not transcript_text:
+            return None
+
+        is_final = bool(response_json.get("is_final", True))
+        timestamp = float(response_json.get("timestamp", time.time()))
+
+        detected_lang = (
+            response_json.get("language_code")
+            or response_json.get("detected_language")
+            or response_json.get("data", {}).get("language_code")
+        )
+        detected_langs = response_json.get("detected_languages", [])
+        if detected_lang and not detected_langs:
+            detected_langs = [detected_lang]
+        elif detected_langs and not detected_lang:
+            detected_lang = detected_langs[0]
+
+        return TranscriptSegment(
+            session_id=session_id,
+            speaker=speaker,
+            text=transcript_text,
+            timestamp=timestamp if timestamp > 0 else time.time(),
+            is_final=is_final,
+            detected_language=detected_lang,
+            detected_languages=detected_langs,
+        )
+
+    async def stream_transcripts(
+        self,
+        session_id: str,
+        input_data: Any,
+        speaker: SpeakerType = SpeakerType.CALLER,
+        delay_seconds: float = 0.0,
+    ) -> AsyncIterator[TranscriptSegment]:
+        """Stream audio chunks to Sarvam WebSocket and yield TranscriptSegments."""
+        if not self.api_key:
+            raise ValueError(
+                "SARVAM_API_KEY is required to stream transcripts with Sarvam. "
+                "Please configure SARVAM_API_KEY in .env or switch to STT_PROVIDER=mock."
+            )
+
+        try:
+            import websockets
+        except ImportError as err:
+            raise RuntimeError(
+                "The 'websockets' package is required for Sarvam streaming. "
+                "Please install it using: pip install websockets"
+            ) from err
+
+        ws_url = self.build_websocket_url()
+        headers = {"api-subscription-key": self.api_key}
+
+        try:
+            async with websockets.connect(ws_url, extra_headers=headers) as ws:
+                async def send_audio_stream() -> None:
+                    try:
+                        if hasattr(input_data, "__aiter__"):
+                            async for chunk in input_data:
+                                if isinstance(chunk, (bytes, bytearray)):
+                                    await ws.send(chunk)
+                                    if delay_seconds > 0:
+                                        await asyncio.sleep(delay_seconds)
+                        elif isinstance(input_data, (list, tuple)):
+                            for chunk in input_data:
+                                if isinstance(chunk, (bytes, bytearray)):
+                                    await ws.send(chunk)
+                                    if delay_seconds > 0:
+                                        await asyncio.sleep(delay_seconds)
+                        await ws.send(json.dumps({"type": "CloseStream"}))
+                    except Exception as exc:
+                        logger.error("Error streaming audio frames to Sarvam: %s", exc)
+
+                sender_task = asyncio.create_task(send_audio_stream())
+
+                try:
+                    async for raw_message in ws:
+                        try:
+                            msg_dict = json.loads(raw_message)
+                            segment = self.parse_sarvam_response(
+                                msg_dict, session_id=session_id, speaker=speaker
+                            )
+                            if segment:
+                                yield segment
+                        except json.JSONDecodeError:
+                            continue
+                finally:
+                    if not sender_task.done():
+                        sender_task.cancel()
+
+        except Exception as exc:
+            logger.error("Sarvam WebSocket streaming connection failed: %s", exc)
+            raise RuntimeError(
+                f"Sarvam streaming connection error: {exc}. "
+                f"Ensure internet connectivity and valid SARVAM_API_KEY."
+            ) from exc
+
+
 def get_stt_provider(mode: Optional[str] = None) -> BaseSTTProvider:
     """Factory to retrieve the active STT provider.
 
     Resolution order:
-      1. Explicit 'mode' argument ('mock' or 'deepgram').
+      1. Explicit 'mode' argument ('mock', 'deepgram', or 'sarvam').
       2. Environment / settings.STT_PROVIDER.
-      3. Fallback: If 'deepgram' is selected but no key is configured,
-         raises ValueError if explicitly requested, or defaults to MockSTTProvider.
+      3. Error validation for missing API keys or invalid provider names.
     """
     selected_mode = (mode or settings.STT_PROVIDER or "mock").lower().strip()
 
-    if selected_mode == "deepgram":
+    if selected_mode == "mock":
+        return MockSTTProvider()
+    elif selected_mode == "deepgram":
         if not settings.DEEPGRAM_API_KEY:
             raise ValueError(
                 "STT_PROVIDER is configured as 'deepgram', but DEEPGRAM_API_KEY is not set. "
                 "Please configure DEEPGRAM_API_KEY in your .env or set STT_PROVIDER=mock."
             )
         return DeepgramSTTProvider(api_key=settings.DEEPGRAM_API_KEY)
-
-    return MockSTTProvider()
+    elif selected_mode == "sarvam":
+        if not settings.SARVAM_API_KEY:
+            raise ValueError(
+                "STT_PROVIDER is configured as 'sarvam', but SARVAM_API_KEY is not set. "
+                "Please configure SARVAM_API_KEY in your .env or set STT_PROVIDER=mock."
+            )
+        return SarvamSTTProvider(api_key=settings.SARVAM_API_KEY)
+    else:
+        raise ValueError(
+            f"Unsupported STT provider '{selected_mode}'. "
+            f"Supported providers are 'mock', 'deepgram', and 'sarvam'."
+        )
 
 
 # Global default instances

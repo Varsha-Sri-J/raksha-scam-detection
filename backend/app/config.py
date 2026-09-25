@@ -26,13 +26,20 @@ class Settings(BaseSettings):
     # Risk Engine Defaults (Phase 1 Baseline)
     BASELINE_RISK_SCORE: float = 0.0
 
-    # STT Provider Configuration (Phase 3B)
-    STT_PROVIDER: str = "mock"  # "mock" or "deepgram"
+    # STT Provider Configuration (Phase 3B & Multilingual)
+    STT_PROVIDER: str = "mock"  # "mock", "deepgram", or "sarvam"
     DEEPGRAM_API_KEY: Optional[str] = None
     DEEPGRAM_MODEL: str = "nova-2"
     DEEPGRAM_LANGUAGE: str = "en"
     DEEPGRAM_SAMPLE_RATE: int = 8000
     DEEPGRAM_ENCODING: str = "mulaw"
+
+    # Sarvam Multilingual STT Provider Configuration
+    SARVAM_API_KEY: Optional[str] = None
+    SARVAM_STT_MODEL: str = "saaras:v3-realtime"
+    SARVAM_LANGUAGE_CODE: str = "auto"
+    SARVAM_SAMPLE_RATE: int = 8000
+    SARVAM_ENCODING: str = "mulaw"
 
     # Twilio Configuration (Phase 5A)
     TWILIO_ACCOUNT_SID: Optional[str] = None

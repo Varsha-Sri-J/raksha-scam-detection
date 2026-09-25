@@ -29,7 +29,7 @@ class SemanticClassifier:
     def __init__(
         self,
         engine: Optional[EmbeddingEngine] = None,
-        similarity_threshold: float = 0.45,
+        similarity_threshold: float = 0.55,
     ) -> None:
         self.embedding_engine = engine or embedding_engine
         self.similarity_threshold = similarity_threshold
