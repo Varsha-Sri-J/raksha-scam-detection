@@ -56,6 +56,18 @@ class ConnectionManager:
                     "Pruned %d dead sockets for session %s", len(dead_sockets), session_id
                 )
 
+    async def broadcast_all(self, message: WSMessage) -> None:
+        """Broadcast message to all connected WebSocket clients across all sessions."""
+        async with self._lock:
+            all_sockets = [
+                ws for sockets in self.active_connections.values() for ws in sockets
+            ]
+        if all_sockets:
+            payload = message.model_dump_json()
+            await asyncio.gather(
+                *[ws.send_text(payload) for ws in all_sockets], return_exceptions=True
+            )
+
     async def get_connection_count(self, session_id: str) -> int:
         """Return the number of active WebSocket connections for a session."""
         async with self._lock:

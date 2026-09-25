@@ -20,7 +20,9 @@ from pydantic import BaseModel
 from backend.app.config import settings
 from backend.app.models import (
     CallSession,
+    CampaignRecord,
     CaregiverContact,
+    LawEnforcementReport,
     RiskAssessment,
     SessionStatus,
     SpeakerType,
@@ -30,6 +32,7 @@ from backend.app.models import (
     WSMessageType,
 )
 from backend.app.risk_engine import risk_engine
+from backend.app.services.campaign_service import campaign_service
 from backend.app.services.connection_manager import manager
 from backend.app.services.pipeline import streaming_pipeline
 from backend.app.services.session_store import session_store
@@ -183,6 +186,24 @@ async def simulate_session(session_id: str, payload: SimulateSessionRequest) -> 
         broadcast=True,
     )
     session = await session_store.get_session(session_id)
+
+    # Phase 10E-1: Ingest finalized simulation into campaign analysis engine
+    if session:
+        campaign_res = await campaign_service.ingest_session(session)
+        if campaign_res:
+            campaign, link_score, is_new = campaign_res
+            await manager.broadcast_session(
+                session_id,
+                WSMessage(
+                    type=WSMessageType.CAMPAIGN_UPDATE,
+                    data={
+                        "campaign": campaign.model_dump(),
+                        "link_score": link_score,
+                        "is_new": is_new,
+                    },
+                ),
+            )
+
     return {
         "session_id": session_id,
         "steps_processed": len(results),
@@ -213,7 +234,104 @@ async def end_session(session_id: str) -> CallSession:
             data={"status": session.status.value},
         ),
     )
+
+    # Phase 10E-1: Ingest ended session into campaign analysis engine
+    campaign_res = await campaign_service.ingest_session(session)
+    if campaign_res:
+        campaign, link_score, is_new = campaign_res
+        await manager.broadcast_session(
+            session_id,
+            WSMessage(
+                type=WSMessageType.CAMPAIGN_UPDATE,
+                data={
+                    "campaign": campaign.model_dump(),
+                    "link_score": link_score,
+                    "is_new": is_new,
+                },
+            ),
+        )
+
     return session
+
+
+# --- Campaign Link Analysis Endpoints (Phase 10E-1) ---
+
+
+@app.get("/api/campaigns", response_model=List[CampaignRecord], tags=["Campaigns"])
+async def list_campaigns() -> List[CampaignRecord]:
+    """List all active scam campaigns identified by RAKSHA."""
+    return campaign_service.list_campaigns()
+
+
+@app.get("/api/campaigns/{campaign_id}", response_model=CampaignRecord, tags=["Campaigns"])
+async def get_campaign(campaign_id: str) -> CampaignRecord:
+    """Retrieve detailed campaign intelligence record by ID."""
+    campaign = campaign_service.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+    return campaign
+
+
+@app.post("/api/campaigns/{campaign_id}/report", response_model=LawEnforcementReport, tags=["Campaigns"])
+async def generate_campaign_report(campaign_id: str) -> LawEnforcementReport:
+    """Generate mock law-enforcement report for an eligible campaign (Phase 10E-2)."""
+    campaign = campaign_service.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+
+    # Idempotency check: if report already exists, return it
+    existing_report = campaign_service.get_report_by_campaign(campaign_id)
+    if existing_report:
+        return existing_report
+
+    # Verify eligibility threshold
+    if campaign.incident_count < campaign_service.escalation_min_incidents:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Campaign {campaign_id} has {campaign.incident_count} incidents; "
+                f"minimum {campaign_service.escalation_min_incidents} required for law-enforcement escalation"
+            ),
+        )
+
+    try:
+        report = campaign_service.generate_law_enforcement_report(campaign_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # Broadcast updated campaign state via WebSocket (safe metadata only)
+    await manager.broadcast_all(
+        WSMessage(
+            type=WSMessageType.CAMPAIGN_UPDATE,
+            data={
+                "campaign": campaign.model_dump(),
+                "report": {
+                    "report_id": report.report_id,
+                    "campaign_id": report.campaign_id,
+                    "status": report.status,
+                    "generated_at": report.generated_at,
+                },
+            },
+        )
+    )
+    return report
+
+
+@app.get("/api/campaigns/{campaign_id}/report", response_model=LawEnforcementReport, tags=["Campaigns"])
+async def get_campaign_report(campaign_id: str) -> LawEnforcementReport:
+    """Retrieve existing mock law-enforcement report for a campaign."""
+    campaign = campaign_service.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+
+    report = campaign_service.get_report_by_campaign(campaign_id)
+    if not report:
+        raise HTTPException(
+            status_code=404, detail=f"No report generated for campaign {campaign_id}"
+        )
+    return report
+
+
 
 
 # --- WebSocket Endpoint ---
@@ -757,6 +875,8 @@ async def twilio_voice_status(
                     data={"status": SessionStatus.ENDED.value},
                 ),
             )
+            # Phase 10E-1: Ingest ended call into campaign analysis engine
+            await campaign_service.ingest_session(session)
             logger.info("Twilio call %s ended with status %s", call_sid, call_status)
 
     return {

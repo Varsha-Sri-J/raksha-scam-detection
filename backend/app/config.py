@@ -49,6 +49,26 @@ class Settings(BaseSettings):
     USER_WARNING_PROVIDER: str = "mock"  # "mock" or "twilio_conference" (Phase 7D-3C-2)
     PROTECTED_USER_PHONE_NUMBER: Optional[str] = None  # Demo/hackathon destination number
 
+    # Campaign Link Analysis Configuration (Phase 10E-1)
+    # Salt for deterministic non-reversible caller phone number hashing
+    CAMPAIGN_HASH_SALT: str = "raksha_demo_salt_sec_2026"
+    # Multi-factor similarity link cutoff (demo/engineering calibration threshold)
+    CAMPAIGN_MATCH_THRESHOLD: float = 0.72
+    # Bounded in-memory campaign registry ceiling
+    CAMPAIGN_MAX_ACTIVE: int = 50
+    # Campaign activity TTL sliding window (14 days default)
+    CAMPAIGN_TTL_SECONDS: float = 86400.0 * 14
+    # Multi-signal link score weights (sum = 1.0)
+    CAMPAIGN_WEIGHT_TACTIC: float = 0.35
+    CAMPAIGN_WEIGHT_PROGRESSION: float = 0.25
+    CAMPAIGN_WEIGHT_TARGET: float = 0.25
+    CAMPAIGN_WEIGHT_CALLER: float = 0.15
+    # Maximum incident summaries retained per campaign (memory cap)
+    CAMPAIGN_MAX_LINKED_INCIDENTS: int = 50
+    # Phase 10E-2: Campaign Escalation Policy (Demo/Engineering Threshold)
+    # Minimum linked HIGH/CRITICAL incidents required before campaign becomes ESCALATION_ELIGIBLE
+    CAMPAIGN_ESCALATION_MIN_INCIDENTS: int = 3
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

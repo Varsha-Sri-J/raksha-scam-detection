@@ -13,6 +13,7 @@ import SimulationControls from './components/SimulationControls'
 import AttackChain from './components/AttackChain'
 import IncidentSummary from './components/IncidentSummary'
 import CinematicBackground from './components/CinematicBackground'
+import CampaignIntelligence from './components/CampaignIntelligence'
 import { DEMO_SCENARIOS, calculateEvaluationOutcome } from './scenarios'
 import { X } from 'lucide-react'
 
@@ -62,6 +63,9 @@ export default function App() {
   const [attackChain, setAttackChain] = useState([])
   const [isIncidentSummaryOpen, setIsIncidentSummaryOpen] = useState(false)
   const [isListeningMic, setIsListeningMic] = useState(false)
+
+  // Campaign Link Intelligence (Phase 10E)
+  const [activeCampaign, setActiveCampaign] = useState(null)
 
   // Simulation Scenario & Evaluation States (Phase 10E)
   const [activeScenario, setActiveScenario] = useState(null)
@@ -416,6 +420,11 @@ export default function App() {
           // 6. ERROR
           else if (msg.type === 'ERROR' && msg.data?.error) {
             setErrorNotification(msg.data.error)
+          }
+
+          // 7. CAMPAIGN_UPDATE (Phase 10E)
+          else if (msg.type === 'CAMPAIGN_UPDATE' && msg.data?.campaign) {
+            setActiveCampaign(msg.data.campaign)
           }
         } catch (err) {
           console.error('Error parsing WS message:', err)
@@ -804,6 +813,13 @@ export default function App() {
         beforeManualInput={handleBeforeManualInput}
         sessionNotice={sessionNotice}
         activeScenarioName={activeScenario?.name}
+      />
+
+      {/* 6. CAMPAIGN LINK INTELLIGENCE & ESCALATION (Phase 10E) */}
+      <CampaignIntelligence
+        campaign={activeCampaign}
+        caregiverStatus={latestCaregiver?.status}
+        onCampaignUpdate={setActiveCampaign}
       />
 
       {/* Dismissible Tactic Evidence Inspector Modal */}

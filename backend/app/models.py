@@ -237,6 +237,9 @@ class CallSession(BaseModel):
     call_topology: str = "standard"
     protected_user_connected: bool = False
 
+    # Campaign & Attack Sequence Tracking (Phase 10E-1)
+    ordered_tactic_sequence: List[ManipulationCategory] = Field(default_factory=list)
+
 
 class WSMessageType(str, Enum):
     TRANSCRIPT_UPDATE = "TRANSCRIPT_UPDATE"
@@ -248,9 +251,90 @@ class WSMessageType(str, Enum):
     PING = "PING"
     PONG = "PONG"
     ERROR = "ERROR"
+    CAMPAIGN_UPDATE = "CAMPAIGN_UPDATE"
 
 
 class WSMessage(BaseModel):
     type: WSMessageType
     data: Dict[str, Any] = Field(default_factory=dict)
     timestamp: float = Field(default_factory=time.time)
+
+
+# --- Campaign Link Analysis Models (Phase 10E-1) ---
+
+
+class CampaignStatus(str, Enum):
+    DETECTED = "DETECTED"
+    ACTIVE_MONITORING = "ACTIVE_MONITORING"
+    ESCALATION_ELIGIBLE = "ESCALATION_ELIGIBLE"
+    REPORT_GENERATED = "REPORT_GENERATED"
+
+
+class PrivacyMinimizedIncident(BaseModel):
+    """Privacy-minimized representation of a single suspicious incident for cross-call campaign linkage.
+
+    Guarantees:
+    - Zero raw audio or speech recordings stored.
+    - Zero conversational transcripts or raw evidence text stored.
+    - Zero victim PII (names, physical addresses, bank accounts) stored.
+    - Zero caregiver phone numbers stored.
+    - Raw caller phone number is NEVER stored; only salted SHA-256 hash & masked display string.
+    """
+
+    incident_id: str
+    timestamp: float = Field(default_factory=time.time)
+    caller_hash: Optional[str] = None
+    caller_masked: str = "Unknown"
+    tactic_signature: List[ManipulationCategory] = Field(default_factory=list)
+    tactic_sequence: List[str] = Field(default_factory=list)
+    target_category: str = "GENERAL_MANIPULATION"
+    peak_risk_score: float = 0.0
+    final_risk_tier: RiskTier = RiskTier.SAFE
+    caregiver_notification_outcome: Optional[str] = "NOT_TRIGGERED"
+    intervention_outcome: Optional[str] = "NOT_TRIGGERED"
+
+
+class CampaignRecord(BaseModel):
+    """Aggregated campaign intelligence linking multiple related scam incidents."""
+
+    campaign_id: str = Field(default_factory=lambda: f"CMP-{uuid.uuid4().hex[:8].upper()}")
+    status: CampaignStatus = CampaignStatus.DETECTED
+    first_seen: float = Field(default_factory=time.time)
+    last_seen: float = Field(default_factory=time.time)
+    incident_count: int = 1
+    linked_incidents: List[PrivacyMinimizedIncident] = Field(default_factory=list)
+    observed_caller_identifiers: List[str] = Field(default_factory=list)
+    dominant_tactics: List[ManipulationCategory] = Field(default_factory=list)
+    target_categories: List[str] = Field(default_factory=list)
+    average_risk_score: float = 0.0
+    highest_risk_score: float = 0.0
+    risk_tier_distribution: Dict[str, int] = Field(default_factory=dict)
+
+
+class LawEnforcementReport(BaseModel):
+    """Privacy-minimized mock law-enforcement report for a syndicated scam campaign.
+
+    IMPORTANT:
+    DEMO ONLY — NO ACTUAL TRANSMISSION TO LAW ENFORCEMENT.
+    Strictly zero storage of raw audio, transcripts, victim PII, or raw phone numbers.
+    """
+
+    report_id: str = Field(default_factory=lambda: f"RAKSHA-NCRP-{uuid.uuid4().hex[:8].upper()}")
+    campaign_id: str
+    generated_at: float = Field(default_factory=time.time)
+    campaign_status: CampaignStatus = CampaignStatus.REPORT_GENERATED
+    incident_count: int
+    first_seen: float
+    last_seen: float
+    observed_caller_identifiers: List[str] = Field(default_factory=list)
+    dominant_tactics: List[ManipulationCategory] = Field(default_factory=list)
+    target_categories: List[str] = Field(default_factory=list)
+    risk_tier_distribution: Dict[str, int] = Field(default_factory=dict)
+    highest_risk_score: float
+    average_risk_score: float
+    attack_progression_summary: List[str] = Field(default_factory=list)
+    linked_incident_ids: List[str] = Field(default_factory=list)
+    escalation_reason: str
+    status: str = "MOCK_REPORT_GENERATED"
+    disclaimer: str = "DEMO ONLY — NO ACTUAL TRANSMISSION TO LAW ENFORCEMENT"
+    integrity_hash: Optional[str] = None

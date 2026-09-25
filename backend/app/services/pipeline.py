@@ -77,6 +77,10 @@ class StreamingPipeline:
         classification_error: Optional[str] = None
         try:
             matches = await asyncio.to_thread(semantic_classifier.classify_segment, segment)
+            if matches:
+                for m in matches:
+                    if m.tactic not in session.ordered_tactic_sequence:
+                        session.ordered_tactic_sequence.append(m.tactic)
         except Exception as exc:
             classification_error = str(exc)
             logger.exception("Semantic classification failed for session %s: %s", session_id, exc)
