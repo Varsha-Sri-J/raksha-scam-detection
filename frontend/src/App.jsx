@@ -36,6 +36,8 @@ export default function App() {
   const [connectionStatus, setConnectionStatus] = useState('connecting')
   const [isSimulating, setIsSimulating] = useState(false)
   const [isLiveCall, setIsLiveCall] = useState(false)
+  const [callStartedAt, setCallStartedAt] = useState(() => Date.now())
+  const [callEndedAt, setCallEndedAt] = useState(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
 
   // Core Data States
@@ -82,13 +84,34 @@ export default function App() {
     sessionIdRef.current = sessionId
   }, [sessionId])
 
-  // Call Duration Timer
+  // Derive callEnded state strictly from an actual EXECUTED intervention
+  const isCallEnded = Boolean(
+    latestIntervention && latestIntervention.status === 'EXECUTED'
+  )
+
+  // Freeze the timer at the actual elapsed duration when an intervention execution is received
   useEffect(() => {
+    if (isCallEnded && !callEndedAt) {
+      const now = Date.now()
+      setCallEndedAt(now)
+      setElapsedSeconds(Math.max(0, Math.floor((now - callStartedAt) / 1000)))
+    }
+  }, [isCallEnded, callEndedAt, callStartedAt])
+
+  // Call Duration Timer: ticks while call is active, cleans up immediately when ended
+  useEffect(() => {
+    if (isCallEnded) {
+      return
+    }
+
+    setElapsedSeconds(Math.max(0, Math.floor((Date.now() - callStartedAt) / 1000)))
+
     const timer = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1)
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - callStartedAt) / 1000)))
     }, 1000)
+
     return () => clearInterval(timer)
-  }, [])
+  }, [isCallEnded, callStartedAt])
 
   // Determine Operating Mode
   const currentMode = isSimulating ? 'SIMULATION' : isLiveCall ? 'LIVE_CALL' : 'STANDBY'
@@ -231,6 +254,19 @@ export default function App() {
               setLatestIntervention(sorted[0] || null)
             } else {
               setLatestIntervention(null)
+            }
+
+            // Hydrate timer baseline if session has created_at timestamp
+            if (sess.created_at && typeof sess.created_at === 'number') {
+              const startMs = sess.created_at < 1e12 ? sess.created_at * 1000 : sess.created_at
+              setCallStartedAt(startMs)
+              const executed = validInterventions.find((i) => i && i.status === 'EXECUTED')
+              if (executed) {
+                const endTs = executed.timestamp
+                const endMs = endTs ? (endTs < 1e12 ? endTs * 1000 : endTs) : Date.now()
+                setCallEndedAt(endMs)
+                setElapsedSeconds(Math.max(0, Math.floor((endMs - startMs) / 1000)))
+              }
             }
           }
 
@@ -453,6 +489,9 @@ export default function App() {
     setIsListeningMic(false)
     setLastSpeechTimestamp(null)
     setIsProcessingSpeech(false)
+    const resetNow = Date.now()
+    setCallStartedAt(resetNow)
+    setCallEndedAt(null)
     setElapsedSeconds(0)
     setIsSimulating(false)
     setEvaluationResult(null)
@@ -565,6 +604,9 @@ export default function App() {
     setIsListeningMic(false)
     setLastSpeechTimestamp(null)
     setIsProcessingSpeech(false)
+    const simNow = Date.now()
+    setCallStartedAt(simNow)
+    setCallEndedAt(null)
     setElapsedSeconds(0)
     setIsSimulating(true)
     setActiveScenario(scenario)
