@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { Volume2, VolumeX, Mic } from 'lucide-react'
 
-export default function LiveWaveform({ lastActivityTimestamp, isSimulating = false }) {
+export default function LiveWaveform({
+  lastActivityTimestamp,
+  isSimulating = false,
+  isListening = false,
+  mode = 'STANDBY',
+}) {
   const [isActive, setIsActive] = useState(false)
 
   // Track speech activity window (animates if activity occurred within past 2500ms or simulation running)
@@ -28,6 +33,34 @@ export default function LiveWaveform({ lastActivityTimestamp, isSimulating = fal
     }
   }, [lastActivityTimestamp, isSimulating])
 
+  // Explicit privacy status calculation without ambiguous 'always listening'
+  const getPrivacyStatus = () => {
+    if (isSimulating) {
+      return {
+        label: isActive ? 'STREAMING · NO MIC' : 'SIMULATION · NO MIC',
+        className: 'speech-simulation',
+      }
+    }
+    if (isListening) {
+      return {
+        label: isActive ? 'SPEECH DETECTED · WEB SPEECH' : 'MIC ACTIVE · LOCAL WEB SPEECH',
+        className: 'speech-active',
+      }
+    }
+    if (mode === 'LIVE_CALL') {
+      return {
+        label: isActive ? 'SPEECH DETECTED · CARRIER' : 'LIVE CARRIER · MONITORING',
+        className: 'speech-carrier',
+      }
+    }
+    return {
+      label: 'MIC OFF · CHANNEL IDLE',
+      className: 'speech-idle',
+    }
+  }
+
+  const privacy = getPrivacyStatus()
+
   // 18 visualizer bars with pseudo-random oscillating heights during activity
   const barCount = 18
 
@@ -40,12 +73,12 @@ export default function LiveWaveform({ lastActivityTimestamp, isSimulating = fal
           ) : (
             <VolumeX size={14} className="waveform-icon idle-icon" />
           )}
-          <span className="waveform-title">Inbound Audio Activity</span>
+          <span className="waveform-title">LIVE CALL</span>
         </div>
 
-        <div className={`activity-status-pill ${isActive ? 'speech-active' : 'speech-idle'}`}>
+        <div className={`activity-status-pill ${privacy.className}`}>
           <span className="activity-dot" />
-          <span>{isActive ? 'SPEECH DETECTED' : 'CHANNEL IDLE / LISTENING'}</span>
+          <span>{privacy.label}</span>
         </div>
       </div>
 
@@ -63,12 +96,6 @@ export default function LiveWaveform({ lastActivityTimestamp, isSimulating = fal
             />
           )
         })}
-      </div>
-
-      <div className="waveform-footer">
-        <span className="waveform-caption">
-          Visual indicator synchronized with streaming transcript events
-        </span>
       </div>
     </div>
   )

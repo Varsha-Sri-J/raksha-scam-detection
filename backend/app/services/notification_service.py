@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.app.models import (
     CallSession,
+    ManipulationCategory,
     NotificationChannel,
     NotificationRecord,
     NotificationResult,
@@ -98,6 +99,19 @@ class CaregiverNotificationService:
         """Generate a concise, safe message without exposing sensitive transcript contents."""
         callee_name = session.callee_id or "the protected user"
         tier_str = decision.trigger_tier.value
+
+        # Acute credential / OTP extraction escalation
+        if session.latest_risk and session.latest_risk.triggered_tactics:
+            has_otp = any(
+                m.tactic == ManipulationCategory.INFORMATION_PHISHING
+                for m in session.latest_risk.triggered_tactics
+            )
+            if has_otp:
+                display_callee = callee_name.rstrip(".")
+                return (
+                    f"Credential / OTP request detected during monitored call. "
+                    f"Please check on {display_callee}."
+                )
 
         if decision.level == ProtectionLevel.CRITICAL_INTERCEPT:
             return (

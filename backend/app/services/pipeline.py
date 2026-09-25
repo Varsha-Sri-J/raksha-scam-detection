@@ -216,7 +216,10 @@ class StreamingPipeline:
         if updated_risk:
             risk_event = WSMessage(
                 type=WSMessageType.RISK_UPDATE,
-                data={"risk": updated_risk.model_dump()},
+                data={
+                    "risk": updated_risk.model_dump(),
+                    "cooldown_applied": protection_decision.cooldown_applied if protection_decision else False,
+                },
             )
             events.append(risk_event)
 

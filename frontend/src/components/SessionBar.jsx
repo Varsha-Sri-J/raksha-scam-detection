@@ -1,13 +1,16 @@
 import React from 'react'
-import { Phone, User, Clock, ShieldCheck, Key } from 'lucide-react'
+import { Phone, User, Clock, ShieldCheck, Key, Users, PhoneOff } from 'lucide-react'
 
 export default function SessionBar({
   sessionId,
   callStatus = 'ACTIVE',
   calleeName = 'Lakshmi R.',
   callerNumber = '+91 98765 43210',
+  caregiverName = 'Ananya R. (Daughter)',
   elapsedSeconds = 0,
-  mode = 'STANDBY',
+  riskTier = 'SAFE',
+  isIntervened = false,
+  onResetSession,
 }) {
   const formatDuration = (seconds) => {
     const mins = Math.floor(seconds / 60)
@@ -15,60 +18,83 @@ export default function SessionBar({
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
   }
 
-  const getStatusBadge = () => {
-    const statusLower = (callStatus || 'ACTIVE').toLowerCase()
+  const getStatusDisplay = () => {
+    if (isIntervened) {
+      return (
+        <span className="session-status-pill status-intervened">
+          <PhoneOff size={11} style={{ marginRight: 4 }} />
+          MOCK DISCONNECTED
+        </span>
+      )
+    }
+
+    const tierLower = (riskTier || 'SAFE').toLowerCase()
     return (
-      <span className={`session-status-pill status-${statusLower}`}>
-        {callStatus}
+      <span className={`session-status-pill status-${tierLower}`}>
+        {riskTier === 'CRITICAL' ? 'DEFENSE ENGAGED' : 'MONITORING ACTIVE'}
       </span>
     )
   }
 
   return (
-    <section className="glass-panel session-bar">
+    <section className="glass-panel session-bar" aria-label="Monitored Session Context">
       <div className="session-meta-group">
+        {/* Session Identifier */}
         <div className="meta-item">
           <span className="meta-label">
-            <Key size={11} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-            Session ID
+            <Key size={10} style={{ marginRight: 3, verticalAlign: 'middle' }} />
+            SESSION ID
           </span>
           <span className="meta-value font-mono" title={sessionId}>
             {sessionId}
           </span>
         </div>
 
+        {/* Protected User Identity */}
         <div className="meta-item">
-          <span className="meta-label">Monitored Call</span>
+          <span className="meta-label">PROTECTED USER</span>
           <span className="meta-value">
-            <Phone size={14} color="var(--accent-rose)" /> {callerNumber}
-            <span className="inbound-tag">INBOUND</span>
+            <User size={13} color="var(--accent-cyan)" />
+            <strong>{calleeName}</strong>
+            <span className="demo-tag" title="Demonstration Senior Profile">Senior Profile</span>
           </span>
         </div>
 
+        {/* Emergency Family Contact */}
         <div className="meta-item">
-          <span className="meta-label">Protected Callee</span>
+          <span className="meta-label">EMERGENCY CAREGIVER</span>
           <span className="meta-value">
-            <User size={14} color="var(--accent-cyan)" /> {calleeName}
-            <span className="demo-tag" title="Demonstration Senior Profile">Demo Profile</span>
+            <Users size={13} color="#94a3b8" />
+            <span>{caregiverName}</span>
           </span>
         </div>
 
+        {/* Inbound Call Caller ID */}
         <div className="meta-item">
-          <span className="meta-label">Call Duration</span>
-          <span className="meta-value">
-            <Clock size={14} color="var(--text-muted)" /> {formatDuration(elapsedSeconds)}
+          <span className="meta-label">MONITORED CALL</span>
+          <span className="meta-value font-mono">
+            <Phone size={13} color="var(--accent-rose)" /> {callerNumber}
+            <span className="inbound-tag font-mono">INBOUND</span>
+          </span>
+        </div>
+
+        {/* Call Elapsed Duration */}
+        <div className="meta-item">
+          <span className="meta-label">CALL DURATION</span>
+          <span className="meta-value font-mono">
+            <Clock size={13} color="var(--text-muted)" /> {formatDuration(elapsedSeconds)}
           </span>
         </div>
       </div>
 
       <div className="session-status-group">
-        <div className="meta-item" style={{ textAlign: 'right' }}>
-          <span className="meta-label">Channel Status</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-            {getStatusBadge()}
+        <div className="meta-item status-meta-item">
+          <span className="meta-label">CHANNEL DEFENSE</span>
+          <div className="defense-status-pill-group">
+            {getStatusDisplay()}
             <span className="defense-active-pill">
-              <ShieldCheck size={13} color="var(--accent-emerald)" />
-              Active Defense
+              <ShieldCheck size={12} color="var(--accent-emerald)" />
+              Protected
             </span>
           </div>
         </div>

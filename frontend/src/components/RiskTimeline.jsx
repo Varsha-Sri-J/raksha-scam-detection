@@ -4,11 +4,11 @@ import { Activity, Clock } from 'lucide-react'
 export default function RiskTimeline({ history = [], currentScore = 0 }) {
   // SVG dimensions and padding
   const viewWidth = 500
-  const viewHeight = 130
-  const padLeft = 32
-  const padRight = 16
-  const padTop = 14
-  const padBottom = 24
+  const viewHeight = 88
+  const padLeft = 24
+  const padRight = 10
+  const padTop = 8
+  const padBottom = 16
 
   const plotWidth = viewWidth - padLeft - padRight
   const plotHeight = viewHeight - padTop - padBottom
@@ -62,11 +62,11 @@ export default function RiskTimeline({ history = [], currentScore = 0 }) {
     <div className="risk-timeline-container">
       <div className="timeline-header">
         <div className="timeline-title-group">
-          <Activity size={14} color="var(--accent-cyan)" />
-          <span className="timeline-title">Risk Score Escalation Timeline</span>
+          <Activity size={12} color="var(--accent-cyan)" />
+          <span className="timeline-title">Risk Timeline</span>
         </div>
-        <span className="timeline-points-counter">
-          {dataPoints.length} {dataPoints.length === 1 ? 'Data Point' : 'Data Points'}
+        <span className="timeline-points-counter font-mono">
+          {dataPoints.length} {dataPoints.length === 1 ? 'pt' : 'pts'}
         </span>
       </div>
 
@@ -78,14 +78,14 @@ export default function RiskTimeline({ history = [], currentScore = 0 }) {
         >
           <defs>
             <linearGradient id="riskAreaGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--accent-rose)" stopOpacity="0.35" />
-              <stop offset="50%" stopColor="var(--accent-amber)" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="var(--accent-emerald)" stopOpacity="0.05" />
+              <stop offset="0%" stopColor="#ef4444" stopOpacity="0.30" />
+              <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.04" />
             </linearGradient>
             <linearGradient id="riskLineGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="var(--accent-emerald)" />
-              <stop offset="60%" stopColor="var(--accent-amber)" />
-              <stop offset="100%" stopColor="var(--accent-rose)" />
+              <stop offset="0%" stopColor="#10b981" />
+              <stop offset="55%" stopColor="#f59e0b" />
+              <stop offset="100%" stopColor="#ef4444" />
             </linearGradient>
           </defs>
 
@@ -113,16 +113,16 @@ export default function RiskTimeline({ history = [], currentScore = 0 }) {
           />
 
           {/* Y-Axis Tier Labels */}
-          <text x={padLeft - 6} y={getY(75) + 3} className="axis-text axis-crit">
+          <text x={padLeft - 4} y={getY(75) + 3} className="axis-text axis-crit">
             75
           </text>
-          <text x={padLeft - 6} y={getY(50) + 3} className="axis-text axis-med">
+          <text x={padLeft - 4} y={getY(50) + 3} className="axis-text axis-med">
             50
           </text>
-          <text x={padLeft - 6} y={getY(25) + 3} className="axis-text axis-low">
+          <text x={padLeft - 4} y={getY(25) + 3} className="axis-text axis-low">
             25
           </text>
-          <text x={padLeft - 6} y={getY(0) + 3} className="axis-text axis-safe">
+          <text x={padLeft - 4} y={getY(0) + 3} className="axis-text axis-safe">
             0
           </text>
 
@@ -134,7 +134,7 @@ export default function RiskTimeline({ history = [], currentScore = 0 }) {
             d={linePath}
             fill="none"
             stroke="url(#riskLineGrad)"
-            strokeWidth="2.5"
+            strokeWidth="2.2"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -145,7 +145,7 @@ export default function RiskTimeline({ history = [], currentScore = 0 }) {
               key={i}
               cx={pt.x}
               cy={pt.y}
-              r={i === points.length - 1 ? 4.5 : 3}
+              r={i === points.length - 1 ? 4 : 2.5}
               className={`timeline-dot ${i === points.length - 1 ? 'latest' : ''}`}
             />
           ))}
@@ -155,7 +155,7 @@ export default function RiskTimeline({ history = [], currentScore = 0 }) {
             <circle
               cx={latestPt.x}
               cy={latestPt.y}
-              r={8}
+              r={7}
               className="pulse-ring"
             />
           )}
@@ -163,17 +163,17 @@ export default function RiskTimeline({ history = [], currentScore = 0 }) {
 
         {points.length === 0 && (
           <div className="timeline-empty-hint">
-            <span>Awaiting risk calculation updates from speech events...</span>
+            <span>Awaiting risk calculation updates...</span>
           </div>
         )}
       </div>
 
       <div className="timeline-footer">
         <span className="timeline-axis-label">
-          <Clock size={11} style={{ marginRight: 4 }} />
-          Chronological Utterance Sequence
+          <Clock size={10} style={{ marginRight: 3 }} />
+          Utterance Progression
         </span>
-        <span className="timeline-current-score">
+        <span className="timeline-current-score font-mono">
           Current: <strong>{currentScore.toFixed(0)}</strong> / 100
         </span>
       </div>

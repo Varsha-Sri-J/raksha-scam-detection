@@ -1,14 +1,20 @@
 import React from 'react'
-import { ShieldAlert, AlertTriangle, CheckCircle2, TrendingUp, Info } from 'lucide-react'
+import { ShieldAlert, AlertTriangle, CheckCircle2, TrendingUp, Shield } from 'lucide-react'
 
-export default function ThreatGauge({ riskAssessment, detectedCount = 0 }) {
+export default function ThreatGauge({
+  riskAssessment,
+  detectedCount = 0,
+  peakScore = null,
+}) {
   const score = Math.max(0, Math.min(100, riskAssessment?.overall_score || 0))
   const tier = (riskAssessment?.risk_tier || 'SAFE').toUpperCase()
   const tierClass = tier.toLowerCase()
-  const explanation = riskAssessment?.explanation || 'Baseline safe state.'
+  const explanation =
+    riskAssessment?.explanation ||
+    'Baseline safe state. Monitoring call audio stream for manipulation tactics.'
 
-  // SVG Gauge calculations
-  const radius = 80
+  // SVG Gauge calculations (compact 130x130)
+  const radius = 52
   const circumference = 2 * Math.PI * radius
   const strokeDashoffset = circumference - (score / 100) * circumference
 
@@ -16,52 +22,39 @@ export default function ThreatGauge({ riskAssessment, detectedCount = 0 }) {
     switch (tier) {
       case 'CRITICAL':
       case 'HIGH':
-        return <ShieldAlert size={16} />
+        return <ShieldAlert size={13} />
       case 'MEDIUM':
-        return <AlertTriangle size={16} />
+        return <AlertTriangle size={13} />
       case 'LOW':
       case 'SAFE':
       default:
-        return <CheckCircle2 size={16} />
-    }
-  }
-
-  const getTierDescription = () => {
-    switch (tier) {
-      case 'CRITICAL':
-        return 'Immediate danger of severe fraud or coercion.'
-      case 'HIGH':
-        return 'Multiple aggressive manipulation tactics identified.'
-      case 'MEDIUM':
-        return 'Suspicious urgency or authority claims observed.'
-      case 'LOW':
-        return 'Minor indicators detected; monitoring actively.'
-      case 'SAFE':
-      default:
-        return 'No malicious manipulation patterns detected.'
+        return <CheckCircle2 size={13} />
     }
   }
 
   return (
-    <section className="glass-panel threat-panel">
+    <section className="glass-panel threat-panel" aria-label="Current Threat Assessment">
+      {/* Header */}
       <div className="threat-panel-header">
         <div className="panel-title-group">
-          <TrendingUp size={16} color="var(--accent-cyan)" />
-          <h2 className="panel-heading">Current Risk Score</h2>
+          <TrendingUp size={13} color="#38bdf8" />
+          <h2 className="panel-heading">CURRENT RISK</h2>
         </div>
-        <span className="tactics-counter-pill" title={`${detectedCount} manipulation patterns confirmed`}>
-          {detectedCount} / 8 Tactics
-        </span>
+        {peakScore !== null && peakScore > score && (
+          <span className="peak-score-pill font-mono" title="Highest threat score reached in session">
+            Peak: {Math.round(peakScore)}
+          </span>
+        )}
       </div>
 
-      {/* Hero Circular SVG Gauge */}
+      {/* Compact Circular SVG Gauge (approx 150-170px) */}
       <div className="threat-gauge-wrapper">
-        <svg className="gauge-svg" viewBox="0 0 200 200">
-          <circle className="gauge-bg" cx="100" cy="100" r={radius} />
+        <svg className="gauge-svg" viewBox="0 0 130 130" aria-hidden="true">
+          <circle className="gauge-bg" cx="65" cy="65" r={radius} />
           <circle
             className={`gauge-progress ${tierClass}`}
-            cx="100"
-            cy="100"
+            cx="65"
+            cy="65"
             r={radius}
             strokeDasharray={circumference}
             strokeDashoffset={strokeDashoffset}
@@ -69,31 +62,33 @@ export default function ThreatGauge({ riskAssessment, detectedCount = 0 }) {
         </svg>
 
         <div className="gauge-value-container">
-          <span className={`gauge-number ${tierClass}`}>
+          <span className={`gauge-number ${tierClass} font-mono`}>
             {score.toFixed(0)}
           </span>
-          <span className="gauge-scale">/ 100</span>
-          <span className="gauge-label">Threat Level</span>
+          <span className="gauge-scale font-mono">/ 100</span>
         </div>
       </div>
 
-      {/* Tier Pill Badge */}
-      <div className={`threat-tier-pill ${tierClass}`}>
-        {getTierIcon()}
-        <span>{tier} RISK</span>
+      {/* Risk Tier & Tactics Indicators */}
+      <div className="threat-badges-row">
+        <div className={`threat-tier-pill ${tierClass}`}>
+          {getTierIcon()}
+          <span>{tier} RISK</span>
+        </div>
+        <div className="tactics-counter-pill font-mono" title={`${detectedCount} manipulation patterns confirmed`}>
+          {detectedCount} / 8 TACTICS
+        </div>
       </div>
 
-      <div className="threat-tier-subtext">
-        {getTierDescription()}
-      </div>
-
-      {/* Natural Language Explanation Box */}
+      {/* Why RAKSHA Acted - Compact Prominent Rationale Card */}
       <div className="threat-explanation-card">
         <div className="explanation-header">
-          <Info size={12} color="var(--accent-cyan)" />
-          <span>Risk Assessment Analysis</span>
+          <Shield size={11} color="#38bdf8" />
+          <span className="explanation-title">WHY RAKSHA ACTED</span>
         </div>
-        <p className="explanation-text">{explanation}</p>
+        <p className="explanation-text">
+          {explanation}
+        </p>
       </div>
     </section>
   )

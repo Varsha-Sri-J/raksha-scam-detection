@@ -4,12 +4,16 @@ import SessionBar from './components/SessionBar'
 import ThreatGauge from './components/ThreatGauge'
 import LiveWaveform from './components/LiveWaveform'
 import TranscriptFeed from './components/TranscriptFeed'
-import TacticMatrix, { CANONICAL_TACTICS } from './components/TacticMatrix'
+import { CANONICAL_TACTICS } from './components/TacticMatrix'
 import TacticEvidenceInspector from './components/TacticEvidenceInspector'
 import RiskTimeline from './components/RiskTimeline'
 import AlertPanel from './components/AlertPanel'
 import ResponseStatus from './components/ResponseStatus'
 import SimulationControls from './components/SimulationControls'
+import AttackChain from './components/AttackChain'
+import IncidentSummary from './components/IncidentSummary'
+import CinematicBackground from './components/CinematicBackground'
+import { DEMO_SCENARIOS, calculateEvaluationOutcome } from './scenarios'
 import { X } from 'lucide-react'
 
 function generateSessionId() {
@@ -22,7 +26,13 @@ function generateSessionId() {
 }
 
 export default function App() {
-  const [sessionId, setSessionId] = useState('session-prototype-01')
+  const [sessionId, setSessionId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const urlParam = new URLSearchParams(window.location.search).get('session')
+      if (urlParam) return urlParam
+    }
+    return 'session-prototype-01'
+  })
   const [connectionStatus, setConnectionStatus] = useState('connecting')
   const [isSimulating, setIsSimulating] = useState(false)
   const [isLiveCall, setIsLiveCall] = useState(false)
@@ -45,6 +55,17 @@ export default function App() {
   const [latestCaregiver, setLatestCaregiver] = useState(null)
   const [latestUserWarning, setLatestUserWarning] = useState(null)
   const [latestIntervention, setLatestIntervention] = useState(null)
+
+  // Attack Chain & Incident Summary (Phase 10D)
+  const [attackChain, setAttackChain] = useState([])
+  const [isIncidentSummaryOpen, setIsIncidentSummaryOpen] = useState(false)
+  const [isListeningMic, setIsListeningMic] = useState(false)
+
+  // Simulation Scenario & Evaluation States (Phase 10E)
+  const [activeScenario, setActiveScenario] = useState(null)
+  const [evaluationResult, setEvaluationResult] = useState(null)
+  const [sessionNotice, setSessionNotice] = useState(null)
+  const [isCooldownSuppressed, setIsCooldownSuppressed] = useState(false)
 
   // UI Micro-States
   const [lastSpeechTimestamp, setLastSpeechTimestamp] = useState(null)
@@ -160,6 +181,14 @@ export default function App() {
                   initTactics[t] = { active: true }
                 })
                 setActiveTactics(initTactics)
+                // Hydrate attack chain from accumulated tactics
+                const initialChain = sess.latest_risk.accumulated_tactics.map((tId) => ({
+                  canonicalId: tId,
+                  confidence: null,
+                  evidence: null,
+                  timestamp: sess.latest_risk.timestamp || Date.now() / 1000,
+                }))
+                setAttackChain(initialChain)
               }
               // Initialize risk history point
               if (sess.latest_risk.overall_score !== undefined) {
@@ -249,12 +278,41 @@ export default function App() {
               })
               return next
             })
+
+            // Maintain chronological attack chain based on arrival sequence
+            setAttackChain((prev) => {
+              const next = [...prev]
+              msg.data.tactics.forEach((t) => {
+                const canonicalId = t.canonicalId || t.tactic || t
+                const existingIdx = next.findIndex((n) => n.canonicalId === canonicalId)
+                if (existingIdx === -1) {
+                  next.push({
+                    canonicalId,
+                    confidence: t.confidence ?? null,
+                    evidence: t.evidence_text || null,
+                    timestamp: t.timestamp || Date.now() / 1000,
+                  })
+                } else if (t.confidence !== undefined || t.evidence_text) {
+                  next[existingIdx] = {
+                    ...next[existingIdx],
+                    confidence: t.confidence ?? next[existingIdx].confidence,
+                    evidence: t.evidence_text || next[existingIdx].evidence,
+                    timestamp: t.timestamp || next[existingIdx].timestamp,
+                  }
+                }
+              })
+              return next
+            })
           }
 
           // 4. RISK_UPDATE
           else if (msg.type === 'RISK_UPDATE' && msg.data?.risk) {
             const riskData = msg.data.risk
             setRiskAssessment(riskData)
+
+            if (msg.data.cooldown_applied !== undefined) {
+              setIsCooldownSuppressed(Boolean(msg.data.cooldown_applied))
+            }
 
             // Add point to chronological risk history
             setRiskHistory((prev) => {
@@ -277,12 +335,29 @@ export default function App() {
                 })
                 return next
               })
+
+              // Ensure all accumulated tactics appear in attack chain
+              setAttackChain((prev) => {
+                const next = [...prev]
+                riskData.accumulated_tactics.forEach((tId) => {
+                  if (!next.some((n) => n.canonicalId === tId)) {
+                    next.push({
+                      canonicalId: tId,
+                      confidence: null,
+                      evidence: null,
+                      timestamp: riskData.timestamp || Date.now() / 1000,
+                    })
+                  }
+                })
+                return next
+              })
             }
           }
 
           // 5. ALERT_TRIGGERED
           else if (msg.type === 'ALERT_TRIGGERED' && msg.data) {
             setActiveAlert(msg.data)
+            setIsCooldownSuppressed(false)
 
             // Phase 10C: Ingest downstream protection execution records defensively
             if (Array.isArray(msg.data.caregiver_notifications)) {
@@ -335,8 +410,8 @@ export default function App() {
   }, [sessionId])
 
   // Handle Reset Demo / Fresh Session
-  const handleResetSession = () => {
-    if (isSimulating) return
+  const handleResetSession = (forcedSessionId = null) => {
+    if (isSimulating) return null
 
     // Immediately tear down any active socket callbacks and connection
     if (wsRef.current) {
@@ -373,20 +448,55 @@ export default function App() {
     setLatestIntervention(null)
     setErrorNotification(null)
     setSelectedTactic(null)
+    setAttackChain([])
+    setIsIncidentSummaryOpen(false)
+    setIsListeningMic(false)
     setLastSpeechTimestamp(null)
     setIsProcessingSpeech(false)
     setElapsedSeconds(0)
     setIsSimulating(false)
+    setEvaluationResult(null)
+    setIsCooldownSuppressed(false)
+    setActiveScenario(null)
 
-    // Generate new unique session ID
-    const newSessionId = generateSessionId()
+    // Generate new unique session ID (guard against React event objects)
+    const newSessionId =
+      typeof forcedSessionId === 'string' && forcedSessionId.trim()
+        ? forcedSessionId.trim()
+        : generateSessionId()
     sessionIdRef.current = newSessionId
     setSessionId(newSessionId)
+    return newSessionId
+  }
+
+  // Pre-activation checks for live Browser Mic: ensure no stale simulation state leaks
+  const handleBeforeStartMic = () => {
+    if (transcripts.length > 0 || peakScore > 0 || attackChain.length > 0) {
+      handleResetSession()
+      setSessionNotice('NEW TEST SESSION')
+      setTimeout(() => setSessionNotice(null), 2500)
+    }
+  }
+
+  // Pre-activation checks for manual injection: ensure clean session
+  const handleBeforeManualInput = () => {
+    if (transcripts.length > 0 || peakScore > 0 || attackChain.length > 0) {
+      handleResetSession()
+      setSessionNotice('NEW TEST SESSION')
+      setTimeout(() => setSessionNotice(null), 2500)
+    }
   }
 
   // Handle Manual Transcript Injection
   const handleSendTranscript = ({ speaker, text }) => {
     if (!text.trim()) return
+
+    // If session has existing finished simulation or threat data, clean reset first
+    if (transcripts.length > 0 && (peakScore > 0 || attackChain.length > 0)) {
+      handleResetSession()
+      setSessionNotice('NEW TEST SESSION')
+      setTimeout(() => setSessionNotice(null), 2500)
+    }
 
     const payload = {
       type: 'TRANSCRIPT_UPDATE',
@@ -405,7 +515,7 @@ export default function App() {
         ...prev,
         {
           id: String(Date.now()),
-          session_id: sessionId,
+          session_id: sessionIdRef.current,
           speaker,
           text: text.trim(),
           timestamp: Date.now() / 1000,
@@ -415,32 +525,67 @@ export default function App() {
     }
   }
 
-  // Fictional Indian 5-turn scam scenario for simulation
-  const INDIAN_SCAM_CHUNKS = [
-    'This is Officer Sharma from the Cyber Crime Department.',
-    'An arrest warrant and account freeze have been issued against your bank account for money laundering.',
-    'You must resolve this urgent matter within fifteen minutes before police officers arrive at your residence.',
-    'Do not disconnect this line and do not tell your family or anyone about this investigation.',
-    'Read me the six digit OTP verification code that was just sent to your mobile phone.',
-  ]
-
-  // Handle Mock Scam Simulation
-  const handleSimulateScam = async () => {
-    if (isSimulating || connectionStatus !== 'connected') return
-    setIsSimulating(true)
+  // Handle Mock Scam / Scenario Simulation
+  const handleSimulateScenario = async (scenario) => {
+    if (isSimulating) return
     setErrorNotification(null)
 
-    const targetSessionId = sessionId
+    // Requirement 3: Every simulation MUST start clean
+    // Tear down previous session and generate fresh session ID
+    if (wsRef.current) {
+      wsRef.current.onopen = null
+      wsRef.current.onclose = null
+      wsRef.current.onerror = null
+      wsRef.current.onmessage = null
+      wsRef.current.close()
+      wsRef.current = null
+    }
+
+    const newSessionId = generateSessionId()
+    sessionIdRef.current = newSessionId
+
+    // Clear all previous simulation telemetry and downstream protection state
+    setTranscripts([])
+    setRiskAssessment({
+      overall_score: 0.0,
+      risk_tier: 'SAFE',
+      explanation: 'Baseline safe state. Monitoring call stream.',
+      accumulated_tactics: [],
+    })
+    setActiveTactics({})
+    setRiskHistory([])
+    setActiveAlert(null)
+    setLatestCaregiver(null)
+    setLatestUserWarning(null)
+    setLatestIntervention(null)
+    setErrorNotification(null)
+    setSelectedTactic(null)
+    setAttackChain([])
+    setIsIncidentSummaryOpen(false)
+    setIsListeningMic(false)
+    setLastSpeechTimestamp(null)
+    setIsProcessingSpeech(false)
+    setElapsedSeconds(0)
+    setIsSimulating(true)
+    setActiveScenario(scenario)
+    setEvaluationResult(null)
+    setIsCooldownSuppressed(false)
+
+    // Trigger fresh WebSocket connection for the new session
+    setSessionId(newSessionId)
+
+    // Allow socket to connect before simulation starts streaming
+    await new Promise((r) => setTimeout(r, 150))
 
     try {
-      const res = await fetch(`/api/sessions/${targetSessionId}/simulate`, {
+      const res = await fetch(`/api/sessions/${newSessionId}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chunks: INDIAN_SCAM_CHUNKS,
-          delay_seconds: 0.6,
-          callee_id: 'Lakshmi R.',
-          caregiver_contacts: [
+          chunks: scenario.chunks,
+          delay_seconds: 0.65,
+          callee_id: scenario.calleeId || 'Lakshmi R.',
+          caregiver_contacts: scenario.caregivers || [
             {
               name: 'Ananya R.',
               phone_number: '+91 91234 56789',
@@ -452,25 +597,58 @@ export default function App() {
       })
       if (!res.ok) {
         const data = await res.json()
-        if (sessionIdRef.current === targetSessionId) {
+        if (sessionIdRef.current === newSessionId) {
           setErrorNotification(data.detail || 'Simulation request failed')
         }
+      } else {
+        const data = await res.json()
+        const finalTier = data?.latest_risk?.risk_tier || 'SAFE'
+        const outcome = calculateEvaluationOutcome(scenario.groundTruth, finalTier)
+        setEvaluationResult({
+          scenarioName: scenario.name,
+          groundTruth: scenario.groundTruth,
+          finalTier,
+          outcome,
+        })
       }
     } catch (err) {
-      if (sessionIdRef.current === targetSessionId) {
+      if (sessionIdRef.current === newSessionId) {
         setErrorNotification('Could not connect to simulation API')
       }
     } finally {
-      if (sessionIdRef.current === targetSessionId) {
+      if (sessionIdRef.current === newSessionId) {
         setIsSimulating(false)
       }
     }
   }
 
+  const peakScore = Math.max(
+    0,
+    ...riskHistory.map((p) => (typeof p.score === 'number' ? p.score : 0)),
+    typeof riskAssessment?.overall_score === 'number' ? riskAssessment.overall_score : 0
+  )
+
+  const hasIncidentData =
+    attackChain.length > 0 ||
+    peakScore > 0 ||
+    Boolean(latestCaregiver) ||
+    Boolean(latestUserWarning) ||
+    Boolean(latestIntervention)
+
   return (
     <div className="app-container">
+      {/* 0. Ambient Cinematic Liquid Metal Background */}
+      <CinematicBackground riskTier={riskAssessment?.risk_tier || 'SAFE'} />
+
       {/* 1. Header with Connection & Mode Indicators */}
-      <Header connectionStatus={connectionStatus} mode={currentMode} />
+      <Header
+        connectionStatus={connectionStatus}
+        mode={currentMode}
+        isListening={isListeningMic}
+        isSimulating={isSimulating}
+        hasIncidentData={hasIncidentData}
+        onOpenIncidentSummary={() => setIsIncidentSummaryOpen(true)}
+      />
 
       {/* 2. Call Session Context Bar */}
       <SessionBar
@@ -478,11 +656,14 @@ export default function App() {
         callStatus="ACTIVE"
         calleeName="Lakshmi R."
         callerNumber="+91 98765 43210"
+        caregiverName="Ananya R. (Daughter)"
         elapsedSeconds={elapsedSeconds}
-        mode={currentMode}
+        riskTier={riskAssessment?.risk_tier || 'SAFE'}
+        isIntervened={Boolean(latestIntervention && latestIntervention.status === 'EXECUTED')}
+        onResetSession={handleResetSession}
       />
 
-      {/* 3. Priority Alert Banner (when ALERT_TRIGGERED) */}
+      {/* Priority Alert Banner (when ALERT_TRIGGERED) */}
       {activeAlert && (
         <AlertPanel alert={activeAlert} onDismiss={() => setActiveAlert(null)} />
       )}
@@ -501,13 +682,14 @@ export default function App() {
         </div>
       )}
 
-      {/* 4. Main 3-Column Cyber Defense Intelligence Grid */}
+      {/* 3. Primary Command Center Grid: THREAT | TRANSCRIPT | PROTECTION */}
       <main className="dashboard-grid">
-        {/* Left Column: Hero Threat Gauge & Risk Timeline */}
+        {/* Left Column: THREAT (Gauge + Timeline) */}
         <div className="left-column">
           <ThreatGauge
             riskAssessment={riskAssessment}
             detectedCount={detectedTacticsCount}
+            peakScore={peakScore}
           />
           <RiskTimeline
             history={riskHistory}
@@ -515,61 +697,96 @@ export default function App() {
           />
         </div>
 
-        {/* Center Column: Live Waveform, Transcript Feed & Simulation Suite */}
+        {/* Center Column: TRANSCRIPT (Live Waveform + Internal Scrolling Feed) */}
         <div className="center-column">
           <section className="glass-panel transcript-panel">
-            {/* Audio Speech Activity Visualizer */}
             <LiveWaveform
               lastActivityTimestamp={lastSpeechTimestamp}
               isSimulating={isSimulating}
+              isListening={isListeningMic}
+              mode={currentMode}
             />
-
-            {/* Live Dual-Speaker Transcript Feed */}
             <TranscriptFeed
               transcripts={transcripts}
               isProcessing={isProcessingSpeech}
               scrollAnchorRef={feedEndRef}
             />
-
-            {/* Test & Simulation Controls */}
-            <SimulationControls
-              sessionId={sessionId}
-              onSimulate={handleSimulateScam}
-              onResetSession={handleResetSession}
-              onSendTranscript={handleSendTranscript}
-              isSimulating={isSimulating}
-              disabled={connectionStatus !== 'connected'}
-            />
           </section>
         </div>
 
-        {/* Right Column: Manipulation Taxonomy Matrix */}
+        {/* Right Column: PROTECTION */}
         <div className="right-column">
-          <TacticMatrix
-            activeTactics={activeTactics}
-            accumulatedTactics={riskAssessment?.accumulated_tactics || []}
-            onSelectTactic={(tacticData) => setSelectedTactic(tacticData)}
+          <ResponseStatus
+            riskTier={riskAssessment?.risk_tier || 'SAFE'}
+            riskScore={riskAssessment?.overall_score || 0}
+            hasAlert={Boolean(activeAlert)}
+            mode={currentMode}
+            transcriptsCount={transcripts.length}
+            detectedCount={detectedTacticsCount}
+            explanation={riskAssessment?.explanation || ''}
+            caregiverRecord={latestCaregiver}
+            userWarningRecord={latestUserWarning}
+            interventionRecord={latestIntervention}
+            calleeName="Lakshmi R."
+            cooldownSuppressed={isCooldownSuppressed}
           />
         </div>
       </main>
 
-      {/* 5. Protection Actions & Caregiver Response Status */}
-      <ResponseStatus
-        riskTier={riskAssessment?.risk_tier || 'SAFE'}
-        hasAlert={Boolean(activeAlert)}
-        mode={currentMode}
-        caregiverRecord={latestCaregiver}
-        userWarningRecord={latestUserWarning}
-        interventionRecord={latestIntervention}
+      {/* 4. ATTACK CHAIN (Chronological Progression Track) */}
+      <AttackChain
+        attackChain={attackChain}
+        onSelectTactic={(node) => {
+          const tacticInfo = activeTactics[node.canonicalId] || {}
+          setSelectedTactic({
+            tactic: node.canonicalId,
+            id: node.canonicalId,
+            name: node.canonicalId,
+            confidence: node.confidence ?? tacticInfo.confidence,
+            evidence: node.evidence || tacticInfo.evidence,
+            timestamp: node.timestamp,
+          })
+        }}
       />
 
-      {/* 6. Dismissible Tactic Evidence Inspector Modal */}
+      {/* 5. COMPACT TEST BENCH (Collapsible Docked Controls) */}
+      <SimulationControls
+        sessionId={sessionId}
+        onSimulate={handleSimulateScenario}
+        onResetSession={handleResetSession}
+        onSendTranscript={handleSendTranscript}
+        isSimulating={isSimulating}
+        disabled={connectionStatus !== 'connected'}
+        onListeningChange={setIsListeningMic}
+        beforeStartMic={handleBeforeStartMic}
+        beforeManualInput={handleBeforeManualInput}
+        sessionNotice={sessionNotice}
+        activeScenarioName={activeScenario?.name}
+      />
+
+      {/* Dismissible Tactic Evidence Inspector Modal */}
       {selectedTactic && (
         <TacticEvidenceInspector
           tactic={selectedTactic}
           onClose={() => setSelectedTactic(null)}
         />
       )}
+
+      {/* Incident Summary Modal */}
+      <IncidentSummary
+        isOpen={isIncidentSummaryOpen}
+        onClose={() => setIsIncidentSummaryOpen(false)}
+        onResetSession={handleResetSession}
+        sessionId={sessionId}
+        peakScore={peakScore}
+        finalTier={riskAssessment?.risk_tier || 'SAFE'}
+        attackChain={attackChain}
+        caregiverRecord={latestCaregiver}
+        userWarningRecord={latestUserWarning}
+        interventionRecord={latestIntervention}
+        elapsedSeconds={elapsedSeconds}
+        evaluationResult={evaluationResult}
+      />
     </div>
   )
 }

@@ -17,8 +17,8 @@ export default function TranscriptFeed({
     <div className="transcript-feed-container">
       <div className="panel-header transcript-header">
         <div className="panel-title">
-          <Radio size={16} color="var(--accent-cyan)" />
-          <span>Live Call Audio Transcript</span>
+          <Radio size={14} color="var(--accent-cyan)" />
+          <span>LIVE CALL TRANSCRIPT</span>
         </div>
         <div className="transcript-counter-badge">
           <span className="count-number">{transcripts.length}</span>
@@ -39,6 +39,7 @@ export default function TranscriptFeed({
         ) : (
           transcripts.map((segment, idx) => {
             const isCaller = segment.speaker === 'CALLER'
+            const isNewest = idx === transcripts.length - 1
             const timeString = segment.timestamp
               ? new Date(segment.timestamp * 1000).toLocaleTimeString([], {
                   hour: '2-digit',
@@ -50,7 +51,7 @@ export default function TranscriptFeed({
             return (
               <div
                 key={segment.id || `seg-${idx}`}
-                className={`transcript-bubble ${isCaller ? 'caller' : 'callee'}`}
+                className={`transcript-bubble ${isCaller ? 'caller' : 'callee'} ${isNewest ? 'newest-bubble' : ''}`}
               >
                 <div className="bubble-meta">
                   <div className="speaker-identity">
@@ -59,11 +60,11 @@ export default function TranscriptFeed({
                     ) : (
                       <User size={12} className="meta-speaker-icon callee-icon" />
                     )}
-                    <span className={`speaker-tag ${isCaller ? 'caller' : 'callee'}`}>
-                      {isCaller ? 'CALLER / UNKNOWN' : 'CALLEE / PROTECTED'}
+                    <span className={`speaker-tag ${isCaller ? 'caller' : 'callee'} font-mono`}>
+                      {isCaller ? 'CALLER' : 'CALLEE'}
                     </span>
                   </div>
-                  {timeString && <span className="bubble-time">{timeString}</span>}
+                  {timeString && <span className="bubble-time font-mono">{timeString}</span>}
                 </div>
                 <div className="bubble-text">{segment.text}</div>
               </div>
