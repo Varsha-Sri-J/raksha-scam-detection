@@ -130,9 +130,9 @@ def test_legitimate_multilingual_urgent_call():
 @pytest.mark.parametrize(
     "neutral_text",
     [
-        "Main bazar ja raha hu sabzi lene.",
-        "Nanu iga market ge hogi tarakari tarthini.",
-        "Nenu market ki velli kuralu thestanu.",
+        "Namma maneyalliellaru kshema. How was your weekend?",
+        "The weather is nice today and I am drinking coffee.",
+        "I am watching a movie on the television right now.",
     ],
 )
 def test_neutral_multilingual_conversation(neutral_text):
