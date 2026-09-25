@@ -62,6 +62,29 @@ def test_rewritten_novel_scam_wording(phrase, expected_tactic):
     )
 
 
+# --- Test B2: Multilingual & Code-Mixed (Hinglish) Scam Wording ---
+
+@pytest.mark.parametrize(
+    "phrase,expected_tactic",
+    [
+        ("Aapka bank account freeze ho gaya hai, turant OTP bataiye.", ManipulationCategory.INFORMATION_PHISHING),
+        ("Main Mumbai Police Crime Branch se Officer Sharma bol raha hu.", ManipulationCategory.AUTHORITY_IMPERSONATION),
+        ("Aapka sara balance RBI safety account mein UPI se transfer karo.", ManipulationCategory.FINANCIAL_REDIRECTION),
+        ("Call disconnect mat karna warna police aapke ghar aayegi.", ManipulationCategory.ISOLATION_SECRECY),
+        ("Aapke naam par arrest warrant issue ho gaya hai aur police bhej rahe hain.", ManipulationCategory.FEAR_INTIMIDATION),
+    ],
+)
+def test_multilingual_hinglish_code_mixed_scam_wording(phrase, expected_tactic):
+    """Multilingual and Hinglish code-mixed scam wording should map to appropriate manipulation categories."""
+    matches = semantic_classifier.classify_text(phrase)
+    detected_tactics = {m.tactic for m in matches}
+
+    assert expected_tactic in detected_tactics, (
+        f"Expected tactic '{expected_tactic}' for Hinglish phrase '{phrase}', "
+        f"but detected: {[m.tactic for m in matches]}"
+    )
+
+
 # --- Test C: Multi-Tactic Scam Conversation ---
 
 def test_multi_tactic_scam():

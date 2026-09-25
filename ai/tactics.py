@@ -26,6 +26,8 @@ TACTIC_REGISTRY: Dict[ManipulationCategory, TacticDefinition] = {
             "Do not delay, every second counts right now",
             "Immediate action required before the system locks down",
             "You only have a few minutes to resolve this urgent matter",
+            "Aapko abhi turant action lena hoga nahi to account block ho jayega",
+            "Only ten minutes left before your SIM card and line is disconnected",
         ],
     ),
     ManipulationCategory.AUTHORITY_IMPERSONATION: TacticDefinition(
@@ -40,6 +42,9 @@ TACTIC_REGISTRY: Dict[ManipulationCategory, TacticDefinition] = {
             "I am the federal tax inspector handling your arrest warrant",
             "This is customs and border protection narcotics division",
             "I am a special agent with the national security agency",
+            "Main Mumbai Police Crime Branch se Officer Sharma bol raha hu",
+            "This is CBI digital arrest officer calling regarding your illegal parcel",
+            "Calling from Telecom Regulatory Authority of India fraud department",
         ],
     ),
     ManipulationCategory.ISOLATION_SECRECY: TacticDefinition(
@@ -54,6 +59,8 @@ TACTIC_REGISTRY: Dict[ManipulationCategory, TacticDefinition] = {
             "Stay on the line with me, do not disconnect or tell anyone",
             "Go into a private room where no one can overhear our conversation",
             "Do not mention this conversation to your children or spouse",
+            "Call disconnect mat karna warna police aapke ghar pahunch jayegi",
+            "Kisi ko mat batana, yeh ek confidential government investigation hai",
         ],
     ),
     ManipulationCategory.FINANCIAL_REDIRECTION: TacticDefinition(
@@ -68,6 +75,8 @@ TACTIC_REGISTRY: Dict[ManipulationCategory, TacticDefinition] = {
             "Deposit cash at the Bitcoin ATM terminal immediately",
             "Send money through wire transfer or crypto to protect your balance",
             "Withdraw all cash from your bank and deposit it into the federal escrow account",
+            "Aapka sara paisa RBI safety account mein UPI ya RTGS se transfer karo",
+            "Download AnyDesk app immediately so we can verify and unblock your account",
         ],
     ),
     ManipulationCategory.FEAR_INTIMIDATION: TacticDefinition(
@@ -82,6 +91,8 @@ TACTIC_REGISTRY: Dict[ManipulationCategory, TacticDefinition] = {
             "All your bank accounts and property have been frozen and confiscated",
             "You will be arrested and put in federal prison if you do not comply",
             "You will face severe criminal charges and jail time",
+            "Aapke naam par arrest warrant issue ho gaya hai aur police bhej rahe hain",
+            "Your Aadhaar card is linked to money laundering and drug smuggling",
         ],
     ),
     ManipulationCategory.INFORMATION_PHISHING: TacticDefinition(
@@ -96,6 +107,8 @@ TACTIC_REGISTRY: Dict[ManipulationCategory, TacticDefinition] = {
             "Confirm your full Social Security number and date of birth",
             "Provide the 3-digit CVV security code on the back of your card",
             "What is your online banking username and login password",
+            "Aapke phone par jo 6 digit OTP aaya hai turant bataiye",
+            "Confirm your Aadhaar number and debit card PIN for verification",
         ],
     ),
     ManipulationCategory.CONFUSION_OVERWHELM: TacticDefinition(
@@ -109,6 +122,7 @@ TACTIC_REGISTRY: Dict[ManipulationCategory, TacticDefinition] = {
             "The ledger mismatch requires real-time forensic cache validation",
             "Federal statute requires instantaneous algorithmic escrow indemnification",
             "The international anti-money laundering protocol necessitates server re-authorization",
+            "IPC Section 420 ke tehat digital custody warrant issue hua hai",
         ],
     ),
     ManipulationCategory.RELIEF_FALSE_SALVATION: TacticDefinition(
@@ -123,6 +137,7 @@ TACTIC_REGISTRY: Dict[ManipulationCategory, TacticDefinition] = {
             "If you follow my instructions carefully, you will not get in trouble",
             "Do not worry, as long as you cooperate with me you are safe",
             "I am here to help you resolve this mess before the officers arrive",
+            "Main aapki help kar raha hu taaki aap arrest na ho, meri baat suniye",
         ],
     ),
 }
