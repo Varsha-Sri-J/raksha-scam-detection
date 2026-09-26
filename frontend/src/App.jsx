@@ -14,6 +14,8 @@ import AttackChain from './components/AttackChain'
 import IncidentSummary from './components/IncidentSummary'
 import CinematicBackground from './components/CinematicBackground'
 import CampaignIntelligence from './components/CampaignIntelligence'
+import LandingPage from './components/LandingPage'
+import ProtectionActionToast from './components/ProtectionActionToast'
 import { DEMO_SCENARIOS, calculateEvaluationOutcome } from './scenarios'
 import { X } from 'lucide-react'
 
@@ -34,6 +36,7 @@ export default function App() {
     }
     return 'session-prototype-01'
   })
+  const [selectedRole, setSelectedRole] = useState(null)
   const [connectionStatus, setConnectionStatus] = useState('connecting')
   const [isSimulating, setIsSimulating] = useState(false)
   const [isLiveCall, setIsLiveCall] = useState(false)
@@ -635,6 +638,7 @@ export default function App() {
         body: JSON.stringify({
           chunks: scenario.chunks,
           delay_seconds: 0.65,
+          caller_id: scenario.callerId || scenario.caller_id || '+91 98765 43210',
           callee_id: scenario.calleeId || 'Lakshmi R.',
           caregiver_contacts: scenario.caregivers || [
             {
@@ -654,6 +658,9 @@ export default function App() {
       } else {
         const data = await res.json()
         const finalTier = data?.latest_risk?.risk_tier || 'SAFE'
+        if (data?.latest_risk && sessionIdRef.current === newSessionId) {
+          setRiskAssessment(data.latest_risk)
+        }
         const outcome = calculateEvaluationOutcome(scenario.groundTruth, finalTier)
         setEvaluationResult({
           scenarioName: scenario.name,
@@ -686,141 +693,189 @@ export default function App() {
     Boolean(latestUserWarning) ||
     Boolean(latestIntervention)
 
+  if (!selectedRole) {
+    return (
+      <div className="landing-app-root">
+        <CinematicBackground riskTier="SAFE" />
+        <LandingPage onSelectRole={(role) => setSelectedRole(role)} />
+      </div>
+    )
+  }
+
   return (
     <div className="app-container">
       {/* 0. Ambient Cinematic Liquid Metal Background */}
       <CinematicBackground riskTier={riskAssessment?.risk_tier || 'SAFE'} />
 
-      {/* 1. Header with Connection & Mode Indicators */}
-      <Header
-        connectionStatus={connectionStatus}
-        mode={currentMode}
-        isListening={isListeningMic}
-        isSimulating={isSimulating}
-        hasIncidentData={hasIncidentData}
-        onOpenIncidentSummary={() => setIsIncidentSummaryOpen(true)}
+      {/* Real-Time Protection Action Toasts (Caregiver Alert, User Warning, Call Intervention) */}
+      <ProtectionActionToast
+        latestCaregiver={latestCaregiver}
+        latestUserWarning={latestUserWarning}
+        latestIntervention={latestIntervention}
       />
 
-      {/* 2. Call Session Context Bar */}
-      <SessionBar
-        sessionId={sessionId}
-        callStatus="ACTIVE"
-        calleeName="Lakshmi R."
-        callerNumber="+91 98765 43210"
-        caregiverName="Ananya R. (Daughter)"
-        elapsedSeconds={elapsedSeconds}
-        riskTier={riskAssessment?.risk_tier || 'SAFE'}
-        isIntervened={Boolean(latestIntervention && latestIntervention.status === 'EXECUTED')}
-        onResetSession={handleResetSession}
-      />
+      {/* ==================================================================
+          SECTION 1: PRIMARY RAKSHA CALL-DEFENSE DASHBOARD
+          First landing experience (~1440x900 & 1920x1080)
+          ================================================================== */}
+      <section className="primary-dashboard-section" aria-label="RAKSHA Call Defense Dashboard">
+        {/* 1. Header with Connection & Mode Indicators */}
+        <Header
+          connectionStatus={connectionStatus}
+          mode={currentMode}
+          isListening={isListeningMic}
+          isSimulating={isSimulating}
+          hasIncidentData={hasIncidentData}
+          onOpenIncidentSummary={() => setIsIncidentSummaryOpen(true)}
+          role={selectedRole}
+          onChangeRole={() => setSelectedRole(null)}
+        />
 
-      {/* Priority Alert Banner (when ALERT_TRIGGERED) */}
-      {activeAlert && (
-        <AlertPanel alert={activeAlert} onDismiss={() => setActiveAlert(null)} />
-      )}
+        {/* 2. Call Session Context Bar */}
+        <SessionBar
+          sessionId={sessionId}
+          callStatus="ACTIVE"
+          calleeName="Lakshmi R."
+          callerNumber={activeScenario?.callerId || activeScenario?.caller_id || '+91 98765 43210'}
+          caregiverName="Ananya R. (Daughter)"
+          elapsedSeconds={elapsedSeconds}
+          riskTier={riskAssessment?.risk_tier || 'SAFE'}
+          isIntervened={Boolean(latestIntervention && latestIntervention.status === 'EXECUTED')}
+          onResetSession={handleResetSession}
+        />
 
-      {/* Error Banner */}
-      {errorNotification && (
-        <div className="error-banner">
-          <span>{errorNotification}</span>
-          <button
-            type="button"
-            className="error-dismiss"
-            onClick={() => setErrorNotification(null)}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
+        {/* Priority Alert Banner (when ALERT_TRIGGERED) */}
+        {activeAlert && (
+          <AlertPanel alert={activeAlert} onDismiss={() => setActiveAlert(null)} />
+        )}
 
-      {/* 3. Primary Command Center Grid: THREAT | TRANSCRIPT | PROTECTION */}
-      <main className="dashboard-grid">
-        {/* Left Column: THREAT (Gauge + Timeline) */}
-        <div className="left-column">
-          <ThreatGauge
-            riskAssessment={riskAssessment}
-            detectedCount={detectedTacticsCount}
-            peakScore={peakScore}
-          />
-          <RiskTimeline
-            history={riskHistory}
-            currentScore={riskAssessment?.overall_score || 0}
-          />
-        </div>
+        {/* Error Banner */}
+        {errorNotification && (
+          <div className="error-banner">
+            <span>{errorNotification}</span>
+            <button
+              type="button"
+              className="error-dismiss"
+              onClick={() => setErrorNotification(null)}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
-        {/* Center Column: TRANSCRIPT (Live Waveform + Internal Scrolling Feed) */}
-        <div className="center-column">
-          <section className="glass-panel transcript-panel">
-            <LiveWaveform
-              lastActivityTimestamp={lastSpeechTimestamp}
-              isSimulating={isSimulating}
-              isListening={isListeningMic}
-              mode={currentMode}
+        {/* 3. Primary Command Center Grid: THREAT | TRANSCRIPT | PROTECTION */}
+        <main className="dashboard-grid">
+          {/* Left Column: THREAT (Gauge + Timeline) */}
+          <div className="left-column">
+            <ThreatGauge
+              riskAssessment={riskAssessment}
+              detectedCount={detectedTacticsCount}
+              peakScore={peakScore}
             />
-            <TranscriptFeed
-              transcripts={transcripts}
-              isProcessing={isProcessingSpeech}
-              scrollAnchorRef={feedEndRef}
+            <RiskTimeline
+              history={riskHistory}
+              currentScore={riskAssessment?.overall_score || 0}
+            />
+          </div>
+
+          {/* Center Column: TRANSCRIPT (Live Waveform + Internal Scrolling Feed) */}
+          <div className="center-column">
+            <section className="glass-panel transcript-panel">
+              <LiveWaveform
+                lastActivityTimestamp={lastSpeechTimestamp}
+                isSimulating={isSimulating}
+                isListening={isListeningMic}
+                mode={currentMode}
+              />
+              <TranscriptFeed
+                transcripts={transcripts}
+                isProcessing={isProcessingSpeech}
+                scrollAnchorRef={feedEndRef}
+              />
+            </section>
+          </div>
+
+          {/* Right Column: PROTECTION */}
+          <div className="right-column">
+            <ResponseStatus
+              riskTier={riskAssessment?.risk_tier || 'SAFE'}
+              riskScore={riskAssessment?.overall_score || 0}
+              hasAlert={Boolean(activeAlert)}
+              mode={currentMode}
+              transcriptsCount={transcripts.length}
+              detectedCount={detectedTacticsCount}
+              explanation={riskAssessment?.explanation || ''}
+              caregiverRecord={latestCaregiver}
+              userWarningRecord={latestUserWarning}
+              interventionRecord={latestIntervention}
+              calleeName="Lakshmi R."
+              cooldownSuppressed={isCooldownSuppressed}
+            />
+          </div>
+        </main>
+
+        {/* 4. ATTACK CHAIN (Chronological Progression Track) */}
+        <AttackChain
+          attackChain={attackChain}
+          onSelectTactic={(node) => {
+            const tacticInfo = activeTactics[node.canonicalId] || {}
+            setSelectedTactic({
+              tactic: node.canonicalId,
+              id: node.canonicalId,
+              name: node.canonicalId,
+              confidence: node.confidence ?? tacticInfo.confidence,
+              evidence: node.evidence || tacticInfo.evidence,
+              timestamp: node.timestamp,
+            })
+          }}
+        />
+
+        {/* 5. COMPACT TEST BENCH (Collapsible Docked Controls) */}
+        <SimulationControls
+          sessionId={sessionId}
+          onSimulate={handleSimulateScenario}
+          onResetSession={handleResetSession}
+          onSendTranscript={handleSendTranscript}
+          isSimulating={isSimulating}
+          disabled={connectionStatus !== 'connected'}
+          onListeningChange={setIsListeningMic}
+          beforeStartMic={handleBeforeStartMic}
+          beforeManualInput={handleBeforeManualInput}
+          sessionNotice={sessionNotice}
+          activeScenarioName={activeScenario?.name}
+        />
+      </section>
+
+      {/* ==================================================================
+          VERTICAL TRANSITION & BREATHING ROOM
+          Subtle indicator that Campaign Intelligence is below the fold
+          Exclusively visible for POLICE role
+          ================================================================== */}
+      {selectedRole === 'police' && (
+        <>
+          <div className="section-scroll-indicator" aria-hidden="true">
+            <div className="scroll-indicator-line" />
+            <div className="scroll-indicator-pill font-mono">
+              <span className="scroll-dot" />
+              <span>CROSS-CALL CAMPAIGN INTELLIGENCE</span>
+              <span className="scroll-arrow">↓</span>
+            </div>
+            <div className="scroll-indicator-line" />
+          </div>
+
+          {/* ==================================================================
+              SECTION 2: CAMPAIGN LINK INTELLIGENCE & ESCALATION (Phase 10E)
+              Reached naturally by normal page scrolling
+              ================================================================== */}
+          <section className="secondary-campaign-section" aria-label="Cross-Call Campaign Intelligence">
+            <CampaignIntelligence
+              campaign={activeCampaign}
+              caregiverStatus={latestCaregiver?.status}
+              onCampaignUpdate={setActiveCampaign}
             />
           </section>
-        </div>
-
-        {/* Right Column: PROTECTION */}
-        <div className="right-column">
-          <ResponseStatus
-            riskTier={riskAssessment?.risk_tier || 'SAFE'}
-            riskScore={riskAssessment?.overall_score || 0}
-            hasAlert={Boolean(activeAlert)}
-            mode={currentMode}
-            transcriptsCount={transcripts.length}
-            detectedCount={detectedTacticsCount}
-            explanation={riskAssessment?.explanation || ''}
-            caregiverRecord={latestCaregiver}
-            userWarningRecord={latestUserWarning}
-            interventionRecord={latestIntervention}
-            calleeName="Lakshmi R."
-            cooldownSuppressed={isCooldownSuppressed}
-          />
-        </div>
-      </main>
-
-      {/* 4. ATTACK CHAIN (Chronological Progression Track) */}
-      <AttackChain
-        attackChain={attackChain}
-        onSelectTactic={(node) => {
-          const tacticInfo = activeTactics[node.canonicalId] || {}
-          setSelectedTactic({
-            tactic: node.canonicalId,
-            id: node.canonicalId,
-            name: node.canonicalId,
-            confidence: node.confidence ?? tacticInfo.confidence,
-            evidence: node.evidence || tacticInfo.evidence,
-            timestamp: node.timestamp,
-          })
-        }}
-      />
-
-      {/* 5. COMPACT TEST BENCH (Collapsible Docked Controls) */}
-      <SimulationControls
-        sessionId={sessionId}
-        onSimulate={handleSimulateScenario}
-        onResetSession={handleResetSession}
-        onSendTranscript={handleSendTranscript}
-        isSimulating={isSimulating}
-        disabled={connectionStatus !== 'connected'}
-        onListeningChange={setIsListeningMic}
-        beforeStartMic={handleBeforeStartMic}
-        beforeManualInput={handleBeforeManualInput}
-        sessionNotice={sessionNotice}
-        activeScenarioName={activeScenario?.name}
-      />
-
-      {/* 6. CAMPAIGN LINK INTELLIGENCE & ESCALATION (Phase 10E) */}
-      <CampaignIntelligence
-        campaign={activeCampaign}
-        caregiverStatus={latestCaregiver?.status}
-        onCampaignUpdate={setActiveCampaign}
-      />
+        </>
+      )}
 
       {/* Dismissible Tactic Evidence Inspector Modal */}
       {selectedTactic && (

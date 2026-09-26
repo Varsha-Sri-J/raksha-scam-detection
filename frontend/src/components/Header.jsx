@@ -1,5 +1,10 @@
 import React from 'react'
-import { Shield, Radio, Activity, Cpu, Mic, FileText } from 'lucide-react'
+import { Shield, Radio, Activity, Cpu, Mic, FileText, ArrowLeft } from 'lucide-react'
+
+const ROLE_NAMES = {
+  user_caregiver: 'USER / CAREGIVER',
+  police: 'POLICE',
+}
 
 export default function Header({
   connectionStatus,
@@ -8,6 +13,8 @@ export default function Header({
   isSimulating = false,
   hasIncidentData = false,
   onOpenIncidentSummary = null,
+  role = null,
+  onChangeRole = null,
 }) {
   const getConnectionConfig = () => {
     switch (connectionStatus) {
@@ -95,15 +102,31 @@ export default function Header({
   return (
     <header className="glass-panel header">
       <div className="brand">
+        {onChangeRole && (
+          <button
+            type="button"
+            className="btn-change-role font-mono"
+            onClick={onChangeRole}
+            title="Return to role selection landing page"
+          >
+            <ArrowLeft size={12} />
+            <span>CHANGE ROLE</span>
+          </button>
+        )}
+
         <div className="brand-icon">
           <Shield size={20} />
         </div>
         <div>
           <div className="brand-title-row">
             <h1 className="brand-title">RAKSHA</h1>
-            <span className="brand-version-badge font-mono">v0.1.0 SOC</span>
+            {role && (
+              <span className={`header-role-pill role-${role} font-mono`}>
+                ROLE: {ROLE_NAMES[role] || role.toUpperCase()}
+              </span>
+            )}
           </div>
-          <p className="brand-subtitle">Real-Time Scam Call Interception & Caregiver Defense</p>
+          <p className="brand-subtitle">Real-Time Scam Call Protection & Defense</p>
         </div>
       </div>
 

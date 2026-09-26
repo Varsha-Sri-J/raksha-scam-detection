@@ -175,9 +175,8 @@ export default function SimulationControls({
 
   const handlePrimarySimulateClick = () => {
     setShowScenarioMenu(false)
-    const scenarioToRun =
-      selectedScenario ||
-      DEMO_SCENARIOS[Math.floor(Math.random() * DEMO_SCENARIOS.length)]
+    const scenarioToRun = selectedScenario || DEMO_SCENARIOS[0]
+    setSelectedScenario(scenarioToRun)
     onSimulate(scenarioToRun)
   }
 
@@ -288,7 +287,7 @@ export default function SimulationControls({
               className={`btn-dock btn-dock-primary ${isSimulating ? 'active-sim' : ''}`}
               onClick={handlePrimarySimulateClick}
               disabled={isSimulating || isListening || disabled}
-              title="1-Click: Run simulation scenario (random selection if not chosen)"
+              title={`Run ${selectedScenario?.name || DEMO_SCENARIOS[0].name}`}
             >
               <RefreshCw
                 size={12}
@@ -297,7 +296,7 @@ export default function SimulationControls({
               <span>
                 {isSimulating
                   ? `Simulating ${activeScenarioName || selectedScenario?.name || 'Scenario'}...`
-                  : '▶ SIMULATION'}
+                  : `▶ ${selectedScenario?.name || '01 — Family Call'}`}
               </span>
             </button>
 
@@ -315,24 +314,33 @@ export default function SimulationControls({
             {showScenarioMenu && (
               <div className="scenario-dropdown-menu glass-panel" role="menu">
                 <div className="scenario-dropdown-header">
-                  <span>SELECT SCENARIO</span>
+                  <span>SELECT DEMO SCENARIO</span>
                 </div>
-                {DEMO_SCENARIOS.map((sc) => (
-                  <button
-                    key={sc.id}
-                    type="button"
-                    className={`scenario-menu-item ${selectedScenario?.id === sc.id ? 'selected' : ''}`}
-                    onClick={() => handleSelectScenario(sc)}
-                  >
-                    <div className="scenario-item-main">
-                      <span className="scenario-item-name">{sc.name}</span>
-                      <span className={`scenario-truth-pill truth-${sc.groundTruth.toLowerCase()}`}>
-                        {sc.groundTruth}
-                      </span>
+                {['BENIGN', 'SUSPICIOUS', 'SCAM — ENGLISH', 'SCAM — HINDI', 'SCAM — TELUGU', 'ADDITIONAL'].map((cat) => {
+                  const items = DEMO_SCENARIOS.filter((sc) => sc.category === cat)
+                  if (items.length === 0) return null
+                  return (
+                    <div key={cat} className="scenario-category-group">
+                      <div className="scenario-category-label font-mono">{cat}</div>
+                      {items.map((sc) => (
+                        <button
+                          key={sc.id}
+                          type="button"
+                          className={`scenario-menu-item ${selectedScenario?.id === sc.id ? 'selected' : ''}`}
+                          onClick={() => handleSelectScenario(sc)}
+                        >
+                          <div className="scenario-item-main">
+                            <span className="scenario-item-name">{sc.name}</span>
+                            <span className={`scenario-truth-pill truth-${sc.groundTruth.toLowerCase()}`}>
+                              {sc.type || sc.groundTruth}
+                            </span>
+                          </div>
+                          <span className="scenario-item-desc">{sc.description}</span>
+                        </button>
+                      ))}
                     </div>
-                    <span className="scenario-item-desc">{sc.description}</span>
-                  </button>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
